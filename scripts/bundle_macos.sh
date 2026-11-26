@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="ProjPanel"
-BIN_NAME="proj-panel"
+BIN_NAME="ProjPanel"
 BUNDLE_ID="com.projpanel.app"
 VERSION="$(awk -F '"' '/^version = / { print $2; exit }' "$ROOT_DIR/Cargo.toml")"
 

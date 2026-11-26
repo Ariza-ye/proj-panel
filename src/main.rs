@@ -12,8 +12,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 use gpui_kit::component::{ActiveTheme, TitleBar};
 use gpui_kit::{
-    AnyWindowHandle, App, Bounds, Entity, Global, KeyBinding, WindowBounds, WindowKind,
-    WindowOptions, actions, prelude::*, px, size,
+    AnyWindowHandle, App, Bounds, Entity, Global, KeyBinding, Menu, MenuItem, WindowBounds,
+    WindowKind, WindowOptions, actions, prelude::*, px, size,
 };
 
 use crate::model::ScanReport;
@@ -22,6 +22,8 @@ use crate::tray::{TrayCommand, TrayHandle};
 use crate::ui::icons::AppAssets;
 use crate::ui::window::ProjectWindow;
 
+const APP_NAME: &str = "ProjPanel";
+const APP_ID: &str = "com.projpanel.app";
 const DEFAULT_WINDOW_WIDTH: f32 = 1100.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 const MIN_WINDOW_WIDTH: f32 = 780.0;
@@ -59,6 +61,7 @@ fn main() {
 
     app.run(move |cx: &mut App| {
         gpui_kit::init(cx);
+        cx.set_app_identity(APP_ID, APP_NAME);
         app_icon::apply_dock_icon(cx.theme().is_dark());
 
         cx.bind_keys([
@@ -68,6 +71,11 @@ fn main() {
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &RefreshProjects, cx| refresh_projects(cx));
+        cx.set_menus([Menu::new(APP_NAME).items([
+            MenuItem::action("重新扫描项目", RefreshProjects),
+            MenuItem::separator(),
+            MenuItem::action(format!("退出 {APP_NAME}"), Quit),
+        ])]);
 
         cx.set_global(AppState {
             main_window: None,
@@ -179,9 +187,14 @@ fn open_or_focus_main_window(cx: &mut App) {
             }
         });
 
+    let mut titlebar = TitleBar::title_bar_options();
+    titlebar.title = Some(APP_NAME.into());
+
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         window_min_size: Some(size(px(MIN_WINDOW_WIDTH), px(MIN_WINDOW_HEIGHT))),
+        titlebar: Some(titlebar),
+        app_id: Some(APP_ID.to_string()),
         kind: WindowKind::Normal,
         is_movable: true,
         is_resizable: true,
