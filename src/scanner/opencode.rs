@@ -68,7 +68,13 @@ pub(crate) fn scan_opencode_dir(base: &Path, by_path: &mut HashMap<PathBuf, Agen
                                 .map(|s| s.to_string())
                                 .filter(|s| !s.is_empty());
 
-                            upsert_opencode_entry(by_path, norm, name, ts, "opencode/storage/project");
+                            upsert_opencode_entry(
+                                by_path,
+                                norm,
+                                name,
+                                ts,
+                                "opencode/storage/project",
+                            );
                         }
                     }
                 }

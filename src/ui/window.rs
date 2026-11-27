@@ -56,6 +56,7 @@ const MEMORY_POLL_INTERVAL_SECS: u64 = 3;
 enum ActiveView {
     Projects,
     Activity,
+    Settings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +209,7 @@ pub struct ProjectWindow {
     project_launcher_prefs: HashMap<PathBuf, LauncherKind>,
     last_launcher: Option<LauncherKind>,
     loading: bool,
+    refresh_pending: bool,
     memory_usage_text: Option<SharedString>,
     _memory_monitor_task: Task<()>,
     search_input: Entity<InputState>,
@@ -240,9 +242,8 @@ impl ProjectWindow {
                 .placeholder("搜索项目名称、路径或 AI Agent...")
                 .clean_on_escape()
         });
-        let rename_input = cx.new(|cx| {
-            InputState::new(window, cx).placeholder("输入自定义名称，留空恢复默认")
-        });
+        let rename_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("输入自定义名称，留空恢复默认"));
 
         let search_sub = cx.subscribe_in(&search_input, window, |this, state, event, _, cx| {
             if matches!(event, InputEvent::Change) {
@@ -318,6 +319,7 @@ impl ProjectWindow {
             project_launcher_prefs: initial_launcher_prefs,
             last_launcher: initial_last_launcher,
             loading: false,
+            refresh_pending: false,
             memory_usage_text,
             _memory_monitor_task: memory_monitor_task,
             search_input,
@@ -361,11 +363,12 @@ impl ProjectWindow {
         self.selected_project_path = Some(path.clone());
         self.rebuild_filtered(false);
 
-        if let Some(filtered_pos) = self
-            .filtered_indices
-            .iter()
-            .position(|&idx| self.report.projects.get(idx).is_some_and(|p| p.path == path))
-        {
+        if let Some(filtered_pos) = self.filtered_indices.iter().position(|&idx| {
+            self.report
+                .projects
+                .get(idx)
+                .is_some_and(|p| p.path == path)
+        }) {
             self.list_scroll_handle
                 .scroll_to_item_strict(filtered_pos, ScrollStrategy::Center);
         }
@@ -499,9 +502,9 @@ impl ProjectWindow {
         }
         cx.notify();
 
-        let custom_names = self.app_config.custom_names.clone();
+        let scan_config = self.app_config.clone();
         let task = cx.background_executor().spawn(async move {
-            let report = Arc::new(ScannerRegistry::new().scan_all_with_custom_names(&custom_names));
+            let report = Arc::new(ScannerRegistry::new().scan_all_with_config(&scan_config));
             let launchers = Arc::new(detect_installed_launchers());
             trim_process_memory();
             (report, launchers)
@@ -517,10 +520,87 @@ impl ProjectWindow {
                 if let Some(cb) = &panel.callbacks.on_state_changed {
                     cb(report, launchers, false, cx);
                 }
+                if panel.refresh_pending {
+                    panel.refresh_pending = false;
+                    panel.trigger_refresh(cx);
+                }
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// Starts a rescan, or queues one to run right after the in-flight scan finishes.
+    fn request_refresh(&mut self, cx: &mut Context<Self>) {
+        if self.loading {
+            self.refresh_pending = true;
+        } else {
+            self.trigger_refresh(cx);
+        }
+    }
+
+    /// Persists the configuration and reports a failure as a notification.
+    fn save_config_or_notify(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(err) = self.app_config.save() {
+            window.push_notification(Notification::error(format!("保存设置失败：{err}")), cx);
+        }
+    }
+
+    /// Enables or disables scanning and display of an agent, then rescans.
+    fn set_agent_enabled(
+        &mut self,
+        agent: AgentKind,
+        enabled: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.app_config.set_agent_enabled(agent, enabled) {
+            return;
+        }
+        if !enabled && self.selected_agent == Some(agent) {
+            self.selected_agent = None;
+        }
+        self.save_config_or_notify(window, cx);
+        self.request_refresh(cx);
+        cx.notify();
+    }
+
+    /// Hides a project from the list and records it in the hidden list.
+    fn hide_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self
+            .report
+            .projects
+            .iter()
+            .find(|p| p.path == path)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        if !self.app_config.hide_project(&path) {
+            return;
+        }
+        self.save_config_or_notify(window, cx);
+
+        let mut updated = (*self.report).clone();
+        updated.remove_project(&path);
+        let report_arc = Arc::new(updated);
+        self.apply_report(report_arc.clone());
+        if let Some(cb) = &self.callbacks.on_state_changed {
+            cb(report_arc, self.launchers.clone(), self.loading, cx);
+        }
+        window.push_notification(
+            Notification::success(format!("已隐藏项目：{name}（可在设置中取消隐藏）")),
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Removes a project from the hidden list and rescans to bring it back.
+    fn unhide_project(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.app_config.unhide_project_key(key) {
+            return;
+        }
+        self.save_config_or_notify(window, cx);
+        self.request_refresh(cx);
+        cx.notify();
     }
 
     /// Opens inline custom name editing for the specified project in the detail panel.
@@ -844,9 +924,7 @@ impl ProjectWindow {
 
         Some(
             div()
-                .id(SharedString::from(format!(
-                    "{id_prefix}-wrap-{stable_key}"
-                )))
+                .id(SharedString::from(format!("{id_prefix}-wrap-{stable_key}")))
                 .flex_none()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(|_, _, cx| cx.stop_propagation())
@@ -908,6 +986,21 @@ impl ProjectWindow {
                                 })),
                         )
                         .child(
+                            Button::new("titlebar-settings")
+                                .ghost()
+                                .small()
+                                .icon(IconName::Settings)
+                                .tooltip("设置")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.active_view = if this.active_view == ActiveView::Settings {
+                                        ActiveView::Projects
+                                    } else {
+                                        ActiveView::Settings
+                                    };
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
                             Button::new("titlebar-theme")
                                 .ghost()
                                 .small()
@@ -941,7 +1034,9 @@ impl ProjectWindow {
             .child(
                 SidebarMenuItem::new("项目列表")
                     .icon(IconName::FolderOpen)
-                    .active(self.active_view == ActiveView::Projects && self.selected_agent.is_none())
+                    .active(
+                        self.active_view == ActiveView::Projects && self.selected_agent.is_none(),
+                    )
                     .suffix(move |_, cx| {
                         div()
                             .text_xs()
@@ -1073,15 +1168,13 @@ impl ProjectWindow {
                                 .items_center()
                                 .gap_1()
                                 .child(
-                                    Tag::color(agent_color_name(agent))
-                                        .rounded_full()
-                                        .child(
-                                            h_flex()
-                                                .items_center()
-                                                .gap_1()
-                                                .child(Icon::new(AgentIcon(agent)).xsmall())
-                                                .child(format!("筛选: {}", agent.display_name())),
-                                        ),
+                                    Tag::color(agent_color_name(agent)).rounded_full().child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap_1()
+                                            .child(Icon::new(AgentIcon(agent)).xsmall())
+                                            .child(format!("筛选: {}", agent.display_name())),
+                                    ),
                                 )
                                 .child(
                                     Button::new("btn-clear-agent-filter")
@@ -1337,17 +1430,13 @@ impl ProjectWindow {
                             .items_center()
                             .gap_1p5()
                             .min_w_0()
-                            .child(
-                                div()
-                                    .size(px(8.0))
-                                    .rounded_full()
-                                    .flex_none()
-                                    .bg(if proj.exists {
-                                        cx.theme().green
-                                    } else {
-                                        cx.theme().muted_foreground
-                                    }),
-                            )
+                            .child(div().size(px(8.0)).rounded_full().flex_none().bg(
+                                if proj.exists {
+                                    cx.theme().green
+                                } else {
+                                    cx.theme().muted_foreground
+                                },
+                            ))
                             .child(
                                 div()
                                     .min_w_0()
@@ -1476,16 +1565,13 @@ impl ProjectWindow {
         div().w_full().pb_2().child(card)
     }
 
-    fn render_project_detail(
-        &self,
-        proj_idx: usize,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn render_project_detail(&self, proj_idx: usize, cx: &mut Context<Self>) -> impl IntoElement {
         let proj = &self.report.projects[proj_idx];
         let cached = &self.cached_projects[proj_idx];
         let path_for_open = proj.path.clone();
         let path_for_rename = proj.path.clone();
         let path_for_reset = proj.path.clone();
+        let path_for_hide = proj.path.clone();
         let path_for_copy = cached.full_path.clone();
         let proj_name = cached.name.clone();
         let is_editing = self.editing_project_path.as_ref() == Some(&proj.path);
@@ -1552,7 +1638,10 @@ impl ProjectWindow {
                         div()
                             .text_xs()
                             .text_color(cx.theme().foreground)
-                            .child(format!("最近活跃：{}", format_exact_time(usage.last_active))),
+                            .child(format!(
+                                "最近活跃：{}",
+                                format_exact_time(usage.last_active)
+                            )),
                     )
                     .child(
                         div()
@@ -1712,7 +1801,10 @@ impl ProjectWindow {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().muted_foreground)
-                                    .child(format!("最近：{}", format_exact_time(proj.last_active))),
+                                    .child(format!(
+                                        "最近：{}",
+                                        format_exact_time(proj.last_active)
+                                    )),
                             ),
                     )
                     .child(
@@ -1757,24 +1849,22 @@ impl ProjectWindow {
                                         .small()
                                         .icon(IconName::FolderOpen)
                                         .label("打开目录")
-                                        .on_click(move |_, window, cx| {
-                                            match open_in_file_manager(&path_for_open) {
-                                                Ok(()) => {
-                                                    window.push_notification(
-                                                        Notification::success(format!(
-                                                            "已打开目录：{proj_name}"
-                                                        )),
-                                                        cx,
-                                                    );
-                                                }
-                                                Err(err) => {
-                                                    window.push_notification(
-                                                        Notification::error(format!(
-                                                            "打开失败：{err}"
-                                                        )),
-                                                        cx,
-                                                    );
-                                                }
+                                        .on_click(move |_, window, cx| match open_in_file_manager(
+                                            &path_for_open,
+                                        ) {
+                                            Ok(()) => {
+                                                window.push_notification(
+                                                    Notification::success(format!(
+                                                        "已打开目录：{proj_name}"
+                                                    )),
+                                                    cx,
+                                                );
+                                            }
+                                            Err(err) => {
+                                                window.push_notification(
+                                                    Notification::error(format!("打开失败：{err}")),
+                                                    cx,
+                                                );
                                             }
                                         }),
                                 )
@@ -1794,6 +1884,43 @@ impl ProjectWindow {
                                             cx,
                                         );
                                     }),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .child(
+                                        Icon::new(IconName::Eye)
+                                            .xsmall()
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().foreground)
+                                            .child("在项目列表中显示"),
+                                    ),
+                            )
+                            .child(
+                                Switch::new("detail-hide-switch")
+                                    .small()
+                                    .checked(true)
+                                    .on_change(cx.listener(
+                                        move |this, checked: &bool, window, cx| {
+                                            if !*checked {
+                                                this.hide_project(
+                                                    path_for_hide.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            }
+                                        },
+                                    )),
                             ),
                     )
                     .child(Separator::horizontal())
@@ -1967,6 +2094,120 @@ impl ProjectWindow {
             )
     }
 
+    fn render_settings_view(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let mut agent_rows = v_flex().gap_1();
+        for &agent in AgentKind::ALL.iter() {
+            let enabled = self.app_config.is_agent_enabled(agent);
+            agent_rows = agent_rows.child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .px_2()
+                    .py_1p5()
+                    .rounded(cx.theme().radius)
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap_2()
+                            .child(agent_icon(agent, cx).small())
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(if enabled {
+                                        cx.theme().foreground
+                                    } else {
+                                        cx.theme().muted_foreground
+                                    })
+                                    .child(agent.display_name()),
+                            ),
+                    )
+                    .child(
+                        Switch::new(SharedString::from(format!("switch-agent-{}", agent.id())))
+                            .small()
+                            .checked(enabled)
+                            .on_change(cx.listener(move |this, checked: &bool, window, cx| {
+                                this.set_agent_enabled(agent, *checked, window, cx);
+                            })),
+                    ),
+            );
+        }
+
+        let mut hidden: Vec<(String, String)> = self
+            .app_config
+            .hidden_projects
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        hidden.sort_by(|a, b| a.1.cmp(&b.1));
+
+        let mut hidden_rows = v_flex().gap_1();
+        if hidden.is_empty() {
+            hidden_rows = hidden_rows.child(
+                div()
+                    .py_2()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child("没有被隐藏的项目。可在项目卡片上关闭显示开关来隐藏项目。"),
+            );
+        }
+        for (idx, (key, path)) in hidden.into_iter().enumerate() {
+            hidden_rows = hidden_rows.child(
+                h_flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .px_2()
+                    .py_1p5()
+                    .rounded(cx.theme().radius)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_xs()
+                            .text_color(cx.theme().foreground)
+                            .truncate()
+                            .child(path),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("unhide-{idx}")))
+                            .outline()
+                            .xsmall()
+                            .icon(IconName::Eye)
+                            .label("取消隐藏")
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.unhide_project(&key, window, cx);
+                            })),
+                    ),
+            );
+        }
+
+        div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .overflow_y_scrollbar()
+            .child(
+                v_flex()
+                    .w_full()
+                    .min_w_0()
+                    .gap_4()
+                    .p_4()
+                    .child(
+                        GroupBox::new()
+                            .outline()
+                            .title("软件启用（关闭后不扫描，也不在左侧展示）")
+                            .child(agent_rows),
+                    )
+                    .child(
+                        GroupBox::new()
+                            .outline()
+                            .title("已隐藏的项目")
+                            .child(hidden_rows),
+                    ),
+            )
+    }
+
     fn render_heatmap_group(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let cache = &self.heatmap_cache;
         let start_day = cache.start_day;
@@ -2030,27 +2271,23 @@ impl ProjectWindow {
             .outline()
             .title(format!("近 24 周项目活跃度（共 {active_days} 个活跃日）"))
             .child(
-                v_flex()
-                    .gap_2()
-                    .child(month_headers)
-                    .child(grid)
-                    .child(
-                        h_flex()
-                            .pt_1()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().muted_foreground)
-                                    .child(format!(
-                                        "汇总自 {} 个项目的 Agent 活跃时间戳 · 耗时 {} ms",
-                                        self.report.projects.len(),
-                                        self.report.elapsed_ms
-                                    )),
-                            )
-                            .child(legend),
-                    ),
+                v_flex().gap_2().child(month_headers).child(grid).child(
+                    h_flex()
+                        .pt_1()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(format!(
+                                    "汇总自 {} 个项目的 Agent 活跃时间戳 · 耗时 {} ms",
+                                    self.report.projects.len(),
+                                    self.report.elapsed_ms
+                                )),
+                        )
+                        .child(legend),
+                ),
             )
     }
 
@@ -2075,16 +2312,11 @@ impl ProjectWindow {
                     .gap_1p5()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        div()
-                            .size(px(7.0))
-                            .rounded_full()
-                            .bg(if self.loading {
-                                cx.theme().yellow
-                            } else {
-                                cx.theme().green
-                            }),
-                    )
+                    .child(div().size(px(7.0)).rounded_full().bg(if self.loading {
+                        cx.theme().yellow
+                    } else {
+                        cx.theme().green
+                    }))
                     .child(left_text),
             )
             .right(
@@ -2100,15 +2332,17 @@ impl Render for ProjectWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let visible_count = self.filtered_indices.len();
 
-        let main_content = v_flex()
-            .flex_1()
-            .min_w_0()
-            .h_full()
-            .min_h_0()
-            .map(|el| match self.active_view {
-                ActiveView::Projects => el.child(self.render_projects_view(cx)),
-                ActiveView::Activity => el.child(self.render_activity_view(cx)),
-            });
+        let main_content =
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .min_h_0()
+                .map(|el| match self.active_view {
+                    ActiveView::Projects => el.child(self.render_projects_view(cx)),
+                    ActiveView::Activity => el.child(self.render_activity_view(cx)),
+                    ActiveView::Settings => el.child(self.render_settings_view(cx)),
+                });
 
         v_flex()
             .size_full()
@@ -2158,6 +2392,10 @@ fn format_exact_time(ts: Option<i64>) -> String {
         return "未知".to_string();
     };
     chrono::DateTime::from_timestamp(ts, 0)
-        .map(|dt| dt.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string())
+        .map(|dt| {
+            dt.with_timezone(&Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
         .unwrap_or_else(|| "未知".to_string())
 }

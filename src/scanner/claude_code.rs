@@ -23,7 +23,10 @@ impl AgentScanner for ClaudeCodeScanner {
         let Some(home) = home_dir() else {
             return Ok(Vec::new());
         };
-        scan_claude_dir(&home.join(".claude.json"), &home.join(".claude").join("projects"))
+        scan_claude_dir(
+            &home.join(".claude.json"),
+            &home.join(".claude").join("projects"),
+        )
     }
 }
 
@@ -86,9 +89,8 @@ pub(crate) fn scan_claude_dir(
                     by_path
                         .entry(norm.clone())
                         .and_modify(|existing| {
-                            existing.session_count = Some(
-                                existing.session_count.unwrap_or(0).saturating_add(sessions),
-                            );
+                            existing.session_count =
+                                Some(existing.session_count.unwrap_or(0).saturating_add(sessions));
                             if latest_ts > existing.last_active {
                                 existing.last_active = latest_ts;
                             }

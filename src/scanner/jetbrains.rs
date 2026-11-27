@@ -180,9 +180,7 @@ pub(crate) fn scan_jetbrains_root(
                             existing.last_active = last_active;
                             existing.source = source.clone();
                         }
-                        if display_name.is_some()
-                            && (existing.display_name.is_none() || is_newer)
-                        {
+                        if display_name.is_some() && (existing.display_name.is_none() || is_newer) {
                             existing.display_name = display_name.clone();
                         }
                     })
@@ -261,8 +259,7 @@ fn parse_recent_projects_xml(xml: &str) -> Vec<RawJetBrainsProject> {
                             additional_info_depth += 1;
                         }
                         if let Some(entry) = current_entry.as_mut()
-                            && let (Some(name), Some(val)) =
-                                (tag.attr("name"), tag.attr("value"))
+                            && let (Some(name), Some(val)) = (tag.attr("name"), tag.attr("value"))
                             && matches!(
                                 name.as_str(),
                                 "activationTimestamp" | "projectOpenTimestamp"
@@ -426,11 +423,7 @@ fn resolve_jetbrains_path(raw: &str, home: Option<&Path>) -> Option<PathBuf> {
     };
 
     let norm = normalize_path(&project_dir);
-    if norm.is_absolute() {
-        Some(norm)
-    } else {
-        None
-    }
+    if norm.is_absolute() { Some(norm) } else { None }
 }
 
 fn contains_unexpanded_macro(s: &str) -> bool {
@@ -490,10 +483,7 @@ impl<'a> XmlTag<'a> {
                 break;
             }
             let name_start = i;
-            while i < len
-                && !bytes[i].is_ascii_whitespace()
-                && bytes[i] != b'='
-                && bytes[i] != b'/'
+            while i < len && !bytes[i].is_ascii_whitespace() && bytes[i] != b'=' && bytes[i] != b'/'
             {
                 i += 1;
             }
@@ -726,10 +716,16 @@ mod tests {
         assert_eq!(parsed[0].last_active, Some(1_793_956_453));
 
         let resolved = resolve_jetbrains_path(&parsed[0].raw_path, Some(Path::new("/Users/demo")));
-        assert_eq!(resolved, Some(PathBuf::from("/Users/demo/work/server & api")));
+        assert_eq!(
+            resolved,
+            Some(PathBuf::from("/Users/demo/work/server & api"))
+        );
         assert!(
-            resolve_jetbrains_path("$APPLICATION_CONFIG_DIR$/light-edit", Some(Path::new("/Users/demo")))
-                .is_none()
+            resolve_jetbrains_path(
+                "$APPLICATION_CONFIG_DIR$/light-edit",
+                Some(Path::new("/Users/demo"))
+            )
+            .is_none()
         );
     }
 

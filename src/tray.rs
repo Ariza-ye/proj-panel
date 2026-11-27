@@ -88,7 +88,9 @@ impl TrayHandle {
             builder = builder.with_icon(icon);
         }
 
-        let tray_icon = builder.build().context("failed to create system tray icon")?;
+        let tray_icon = builder
+            .build()
+            .context("failed to create system tray icon")?;
 
         let tx_click = tx.clone();
         TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
@@ -322,8 +324,8 @@ pub fn compute_popover_bounds(
 
     let icon_center_x = anchor.icon_x + anchor.icon_width / 2.0;
     let min_x = anchor.visible_origin_x + POPOVER_SCREEN_MARGIN;
-    let max_x = (anchor.visible_origin_x + anchor.visible_width - width - POPOVER_SCREEN_MARGIN)
-        .max(min_x);
+    let max_x =
+        (anchor.visible_origin_x + anchor.visible_width - width - POPOVER_SCREEN_MARGIN).max(min_x);
     let x = (icon_center_x - width / 2.0).clamp(min_x, max_x);
 
     let min_y = anchor.visible_origin_y + POPOVER_ANCHOR_GAP;
@@ -455,8 +457,14 @@ mod tests {
         assert_eq!(icon_x, (3800.0 - 1512.0 - FALLBACK_ICON_WIDTH / 2.0) as f32);
 
         // Valid Retina (scale 2.0) rect on the same display matches cursor.
-        let (valid_x, valid_w) =
-            resolve_macos_icon_horizontal_span(3800.0 * 2.0, 28.0 * 2.0, 2.0, 3812.0, 1512.0, 2560.0);
+        let (valid_x, valid_w) = resolve_macos_icon_horizontal_span(
+            3800.0 * 2.0,
+            28.0 * 2.0,
+            2.0,
+            3812.0,
+            1512.0,
+            2560.0,
+        );
         assert_eq!(valid_x, (3800.0 - 1512.0) as f32);
         assert_eq!(valid_w, 28.0);
     }

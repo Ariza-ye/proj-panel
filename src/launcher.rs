@@ -596,7 +596,10 @@ fn macos_bundle_has_id(app_path: &Path, bundle_ids: &[&str]) -> bool {
         // Pre-filter binary plists by raw ASCII bytes to avoid spawning plutil unnecessarily.
         let maybe_match = bundle_ids.iter().any(|id| {
             let needle = id.as_bytes();
-            !needle.is_empty() && bytes.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle))
+            !needle.is_empty()
+                && bytes
+                    .windows(needle.len())
+                    .any(|w| w.eq_ignore_ascii_case(needle))
         });
         if !maybe_match {
             return false;
@@ -613,7 +616,9 @@ fn macos_bundle_has_id(app_path: &Path, bundle_ids: &[&str]) -> bool {
         }
         let id = String::from_utf8_lossy(&output.stdout);
         let id = id.trim();
-        return bundle_ids.iter().any(|target| id.eq_ignore_ascii_case(target));
+        return bundle_ids
+            .iter()
+            .any(|target| id.eq_ignore_ascii_case(target));
     }
 
     let Ok(xml) = std::str::from_utf8(&bytes) else {
@@ -622,7 +627,9 @@ fn macos_bundle_has_id(app_path: &Path, bundle_ids: &[&str]) -> bool {
     let Some(id) = extract_xml_plist_string(xml, "CFBundleIdentifier") else {
         return false;
     };
-    bundle_ids.iter().any(|target| id.eq_ignore_ascii_case(target))
+    bundle_ids
+        .iter()
+        .any(|target| id.eq_ignore_ascii_case(target))
 }
 
 #[cfg(target_os = "macos")]
@@ -665,18 +672,16 @@ fn find_macos_cli_fallback(names: &[&str]) -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn detect_macos_launcher(
-    kind: LauncherKind,
-    bundles: &[AppBundleEntry],
-) -> Option<LaunchStrategy> {
-    let cli_fallback = |names: &[&str], args_before_dir: Vec<String>, pass_dir: bool, set_cwd: bool| {
-        find_macos_cli_fallback(names).map(|program| LaunchStrategy::CliCommand {
-            program,
-            args_before_dir,
-            pass_dir_as_arg: pass_dir,
-            set_current_dir: set_cwd,
-        })
-    };
+fn detect_macos_launcher(kind: LauncherKind, bundles: &[AppBundleEntry]) -> Option<LaunchStrategy> {
+    let cli_fallback =
+        |names: &[&str], args_before_dir: Vec<String>, pass_dir: bool, set_cwd: bool| {
+            find_macos_cli_fallback(names).map(|program| LaunchStrategy::CliCommand {
+                program,
+                args_before_dir,
+                pass_dir_as_arg: pass_dir,
+                set_current_dir: set_cwd,
+            })
+        };
 
     match kind {
         LauncherKind::VsCode => find_macos_app_exact(
@@ -867,21 +872,42 @@ fn detect_windows_launcher(kind: LauncherKind) -> Option<LaunchStrategy> {
             simple_cli(&["kiro.cmd", "kiro.exe", "kiro"], extra)
         }
         LauncherKind::Zed => simple_cli(&["zed.exe", "zed"], Vec::new()),
-        LauncherKind::IntelliJIdea => simple_cli(&["idea64.exe", "idea.cmd", "idea.bat"], Vec::new()),
-        LauncherKind::PyCharm => simple_cli(&["pycharm64.exe", "pycharm.cmd", "pycharm.bat"], Vec::new()),
-        LauncherKind::WebStorm => simple_cli(&["webstorm64.exe", "webstorm.cmd", "webstorm.bat"], Vec::new()),
-        LauncherKind::GoLand => simple_cli(&["goland64.exe", "goland.cmd", "goland.bat"], Vec::new()),
+        LauncherKind::IntelliJIdea => {
+            simple_cli(&["idea64.exe", "idea.cmd", "idea.bat"], Vec::new())
+        }
+        LauncherKind::PyCharm => {
+            simple_cli(&["pycharm64.exe", "pycharm.cmd", "pycharm.bat"], Vec::new())
+        }
+        LauncherKind::WebStorm => simple_cli(
+            &["webstorm64.exe", "webstorm.cmd", "webstorm.bat"],
+            Vec::new(),
+        ),
+        LauncherKind::GoLand => {
+            simple_cli(&["goland64.exe", "goland.cmd", "goland.bat"], Vec::new())
+        }
         LauncherKind::CLion => simple_cli(&["clion64.exe", "clion.cmd", "clion.bat"], Vec::new()),
-        LauncherKind::PhpStorm => simple_cli(&["phpstorm64.exe", "phpstorm.cmd", "phpstorm.bat"], Vec::new()),
+        LauncherKind::PhpStorm => simple_cli(
+            &["phpstorm64.exe", "phpstorm.cmd", "phpstorm.bat"],
+            Vec::new(),
+        ),
         LauncherKind::Rider => simple_cli(&["rider64.exe", "rider.cmd", "rider.bat"], Vec::new()),
-        LauncherKind::RustRover => simple_cli(&["rustrover64.exe", "rustrover.cmd", "rustrover.bat"], Vec::new()),
-        LauncherKind::RubyMine => simple_cli(&["rubymine64.exe", "rubymine.cmd", "rubymine.bat"], Vec::new()),
+        LauncherKind::RustRover => simple_cli(
+            &["rustrover64.exe", "rustrover.cmd", "rustrover.bat"],
+            Vec::new(),
+        ),
+        LauncherKind::RubyMine => simple_cli(
+            &["rubymine64.exe", "rubymine.cmd", "rubymine.bat"],
+            Vec::new(),
+        ),
         LauncherKind::Antigravity => {
             let mut extra = Vec::new();
             if let Some(d) = &local_app_data {
                 extra.push(d.join("Programs/Antigravity/Antigravity.exe"));
             }
-            simple_cli(&["antigravity.cmd", "antigravity.exe", "antigravity"], extra)
+            simple_cli(
+                &["antigravity.cmd", "antigravity.exe", "antigravity"],
+                extra,
+            )
         }
         LauncherKind::CodexApp => {
             let mut extra = Vec::new();
@@ -899,30 +925,30 @@ fn detect_windows_launcher(kind: LauncherKind) -> Option<LaunchStrategy> {
         }
         LauncherKind::OpenCodeApp => simple_cli(&["OpenCode.exe"], Vec::new()),
         LauncherKind::OpenChamberApp => simple_cli(&["OpenChamber.exe"], Vec::new()),
-        LauncherKind::Ghostty => find_in_path(&["ghostty.exe"]).map(|program| {
-            LaunchStrategy::CliCommand {
+        LauncherKind::Ghostty => {
+            find_in_path(&["ghostty.exe"]).map(|program| LaunchStrategy::CliCommand {
                 program,
                 args_before_dir: Vec::new(),
                 pass_dir_as_arg: false,
                 set_current_dir: true,
-            }
-        }),
-        LauncherKind::Kitty => find_in_path(&["kitty.exe"]).map(|program| {
-            LaunchStrategy::CliCommand {
+            })
+        }
+        LauncherKind::Kitty => {
+            find_in_path(&["kitty.exe"]).map(|program| LaunchStrategy::CliCommand {
                 program,
                 args_before_dir: vec!["--directory".to_string()],
                 pass_dir_as_arg: true,
                 set_current_dir: false,
-            }
-        }),
-        LauncherKind::Herdr => find_in_path(&["herdr.exe", "Herdr.exe"]).map(|program| {
-            LaunchStrategy::CliCommand {
+            })
+        }
+        LauncherKind::Herdr => {
+            find_in_path(&["herdr.exe", "Herdr.exe"]).map(|program| LaunchStrategy::CliCommand {
                 program,
                 args_before_dir: Vec::new(),
                 pass_dir_as_arg: true,
                 set_current_dir: true,
-            }
-        }),
+            })
+        }
         LauncherKind::ITerm2 => None,
         LauncherKind::WezTerm => find_in_path(&["wezterm-gui.exe", "wezterm.exe"]).map(|program| {
             LaunchStrategy::CliCommand {
@@ -932,22 +958,22 @@ fn detect_windows_launcher(kind: LauncherKind) -> Option<LaunchStrategy> {
                 set_current_dir: false,
             }
         }),
-        LauncherKind::Warp => find_in_path(&["warp.exe"]).map(|program| {
-            LaunchStrategy::CliCommand {
+        LauncherKind::Warp => {
+            find_in_path(&["warp.exe"]).map(|program| LaunchStrategy::CliCommand {
                 program,
                 args_before_dir: Vec::new(),
                 pass_dir_as_arg: true,
                 set_current_dir: true,
-            }
-        }),
-        LauncherKind::Alacritty => find_in_path(&["alacritty.exe"]).map(|program| {
-            LaunchStrategy::CliCommand {
+            })
+        }
+        LauncherKind::Alacritty => {
+            find_in_path(&["alacritty.exe"]).map(|program| LaunchStrategy::CliCommand {
                 program,
                 args_before_dir: vec!["--working-directory".to_string()],
                 pass_dir_as_arg: true,
                 set_current_dir: false,
-            }
-        }),
+            })
+        }
         LauncherKind::SystemTerminal => {
             if let Some(wt) = find_in_path(&["wt.exe"]) {
                 return Some(LaunchStrategy::CliCommand {
@@ -987,8 +1013,12 @@ fn detect_linux_launcher(kind: LauncherKind) -> Option<LaunchStrategy> {
         LauncherKind::Trae => simple_cli(&["trae"]),
         LauncherKind::Kiro => simple_cli(&["kiro"]),
         LauncherKind::Zed => simple_cli(&["zed", "zeditor"]),
-        LauncherKind::IntelliJIdea => simple_cli(&["idea", "intellij-idea-ultimate", "intellij-idea-community"]),
-        LauncherKind::PyCharm => simple_cli(&["pycharm", "pycharm-professional", "pycharm-community"]),
+        LauncherKind::IntelliJIdea => {
+            simple_cli(&["idea", "intellij-idea-ultimate", "intellij-idea-community"])
+        }
+        LauncherKind::PyCharm => {
+            simple_cli(&["pycharm", "pycharm-professional", "pycharm-community"])
+        }
         LauncherKind::WebStorm => simple_cli(&["webstorm"]),
         LauncherKind::GoLand => simple_cli(&["goland"]),
         LauncherKind::CLion => simple_cli(&["clion"]),
@@ -1001,38 +1031,46 @@ fn detect_linux_launcher(kind: LauncherKind) -> Option<LaunchStrategy> {
         LauncherKind::ClaudeDesktop => simple_cli(&["claude-desktop"]),
         LauncherKind::OpenCodeApp => simple_cli(&["opencode-desktop"]),
         LauncherKind::OpenChamberApp => simple_cli(&["openchamber"]),
-        LauncherKind::Ghostty => find_in_path(&["ghostty"]).map(|program| LaunchStrategy::CliCommand {
-            program,
-            args_before_dir: Vec::new(),
-            pass_dir_as_arg: false,
-            set_current_dir: true,
-        }),
+        LauncherKind::Ghostty => {
+            find_in_path(&["ghostty"]).map(|program| LaunchStrategy::CliCommand {
+                program,
+                args_before_dir: Vec::new(),
+                pass_dir_as_arg: false,
+                set_current_dir: true,
+            })
+        }
         LauncherKind::Kitty => find_in_path(&["kitty"]).map(|program| LaunchStrategy::CliCommand {
             program,
             args_before_dir: vec!["--directory".to_string()],
             pass_dir_as_arg: true,
             set_current_dir: false,
         }),
-        LauncherKind::Herdr => find_in_path(&["herdr", "herdr-app"]).map(|program| LaunchStrategy::CliCommand {
-            program,
-            args_before_dir: Vec::new(),
-            pass_dir_as_arg: true,
-            set_current_dir: true,
-        }),
+        LauncherKind::Herdr => {
+            find_in_path(&["herdr", "herdr-app"]).map(|program| LaunchStrategy::CliCommand {
+                program,
+                args_before_dir: Vec::new(),
+                pass_dir_as_arg: true,
+                set_current_dir: true,
+            })
+        }
         LauncherKind::ITerm2 => None,
-        LauncherKind::WezTerm => find_in_path(&["wezterm"]).map(|program| LaunchStrategy::CliCommand {
-            program,
-            args_before_dir: vec!["start".to_string(), "--cwd".to_string()],
-            pass_dir_as_arg: true,
-            set_current_dir: false,
-        }),
+        LauncherKind::WezTerm => {
+            find_in_path(&["wezterm"]).map(|program| LaunchStrategy::CliCommand {
+                program,
+                args_before_dir: vec!["start".to_string(), "--cwd".to_string()],
+                pass_dir_as_arg: true,
+                set_current_dir: false,
+            })
+        }
         LauncherKind::Warp => simple_cli(&["warp-terminal"]),
-        LauncherKind::Alacritty => find_in_path(&["alacritty"]).map(|program| LaunchStrategy::CliCommand {
-            program,
-            args_before_dir: vec!["--working-directory".to_string()],
-            pass_dir_as_arg: true,
-            set_current_dir: false,
-        }),
+        LauncherKind::Alacritty => {
+            find_in_path(&["alacritty"]).map(|program| LaunchStrategy::CliCommand {
+                program,
+                args_before_dir: vec!["--working-directory".to_string()],
+                pass_dir_as_arg: true,
+                set_current_dir: false,
+            })
+        }
         LauncherKind::SystemTerminal => find_in_path(&[
             "x-terminal-emulator",
             "gnome-terminal",
@@ -1098,10 +1136,7 @@ mod tests {
         ];
         let proj = dummy_project(
             "/tmp/demo",
-            vec![
-                (AgentKind::VsCode, Some(100)),
-                (AgentKind::Zed, Some(200)),
-            ],
+            vec![(AgentKind::VsCode, Some(100)), (AgentKind::Zed, Some(200))],
         );
 
         // Prefers most recently active linked agent when no explicit preference exists.
@@ -1111,7 +1146,9 @@ mod tests {
         // Explicit per-project preference overrides agent affinity.
         let mut prefs = HashMap::new();
         prefs.insert(PathBuf::from("/tmp/demo"), LauncherKind::Ghostty);
-        let picked = resolve_primary_launcher(&proj, &installed, &prefs, Some(LauncherKind::VsCode)).unwrap();
+        let picked =
+            resolve_primary_launcher(&proj, &installed, &prefs, Some(LauncherKind::VsCode))
+                .unwrap();
         assert_eq!(picked.kind, LauncherKind::Ghostty);
 
         // Falls back to global last_used when project has no linked installed launcher.
@@ -1148,7 +1185,11 @@ mod tests {
     fn all_launchers_have_unique_ids() {
         let mut seen = HashSet::new();
         for &kind in LauncherKind::ALL {
-            assert!(seen.insert(kind.id()), "duplicate launcher id: {}", kind.id());
+            assert!(
+                seen.insert(kind.id()),
+                "duplicate launcher id: {}",
+                kind.id()
+            );
         }
     }
 
@@ -1157,11 +1198,17 @@ mod tests {
         let detected = detect_installed_launchers();
         let mut seen = HashSet::new();
         for item in &detected {
-            assert!(seen.insert(item.kind), "duplicate detected launcher: {:?}", item.kind);
+            assert!(
+                seen.insert(item.kind),
+                "duplicate detected launcher: {:?}",
+                item.kind
+            );
         }
         #[cfg(target_os = "macos")]
         assert!(
-            detected.iter().any(|l| l.kind == LauncherKind::SystemTerminal),
+            detected
+                .iter()
+                .any(|l| l.kind == LauncherKind::SystemTerminal),
             "macOS should detect built-in Terminal.app"
         );
     }

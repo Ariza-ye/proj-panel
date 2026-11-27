@@ -145,9 +145,7 @@ pub(crate) fn scan_workspace_storage(
                     if is_newer {
                         existing.last_active = last_active;
                     }
-                    if folder_name.is_some()
-                        && (existing.display_name.is_none() || is_newer)
-                    {
+                    if folder_name.is_some() && (existing.display_name.is_none() || is_newer) {
                         existing.display_name = folder_name.clone();
                     }
                 })

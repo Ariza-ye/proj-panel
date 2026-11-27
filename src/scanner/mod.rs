@@ -74,17 +74,21 @@ impl ScannerRegistry {
     /// applying persisted ProjPanel custom names.
     pub fn scan_all(&self) -> ScanReport {
         let cfg = AppConfig::load();
-        self.scan_all_with_custom_names(&cfg.custom_names)
+        self.scan_all_with_config(&cfg)
     }
 
-    /// Runs every registered scanner and aggregates projects with the given custom name overrides.
-    pub fn scan_all_with_custom_names(&self, custom_names: &HashMap<String, String>) -> ScanReport {
+    /// Runs the enabled scanners and aggregates projects, applying custom names and
+    /// dropping projects on the hidden list.
+    pub fn scan_all_with_config(&self, cfg: &AppConfig) -> ScanReport {
         let started = Instant::now();
         let mut raw_entries: Vec<AgentProjectEntry> = Vec::new();
         let mut summaries: Vec<AgentSummary> = Vec::with_capacity(self.scanners.len());
 
         for scanner in &self.scanners {
             let agent = scanner.agent();
+            if !cfg.is_agent_enabled(agent) {
+                continue;
+            }
             match scanner.scan() {
                 Ok(entries) => {
                     let filtered: Vec<AgentProjectEntry> = entries
@@ -109,7 +113,16 @@ impl ScannerRegistry {
             }
         }
 
-        let projects = aggregate_entries_with_custom_names(raw_entries, custom_names);
+        let mut projects = aggregate_entries_with_custom_names(raw_entries, &cfg.custom_names);
+        projects.retain(|p| !cfg.is_project_hidden(&p.path));
+        for summary in &mut summaries {
+            if summary.error.is_none() {
+                summary.project_count = projects
+                    .iter()
+                    .filter(|p| p.has_agent(summary.agent))
+                    .count();
+            }
+        }
         ScanReport::from_results(projects, summaries, started.elapsed())
     }
 }
@@ -149,7 +162,8 @@ pub fn aggregate_entries_with_custom_names(
         grouped
             .entry(key)
             .and_modify(|proj| {
-                if let Some(existing_usage) = proj.agents.iter_mut().find(|u| u.agent == usage.agent)
+                if let Some(existing_usage) =
+                    proj.agents.iter_mut().find(|u| u.agent == usage.agent)
                 {
                     let is_newer = usage.last_active > existing_usage.last_active;
                     if is_newer {

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::model::AgentKind;
 use crate::scanner::paths::{app_config_dir, dedup_key, normalize_path};
 
 const APP_CONFIG_DIR_NAME: &str = "ProjPanel";
@@ -16,6 +17,12 @@ pub struct AppConfig {
     /// Custom project display names keyed by normalized deduplication path key.
     #[serde(default)]
     pub custom_names: HashMap<String, String>,
+    /// Identifiers (see `AgentKind::id`) of agents excluded from scanning and display.
+    #[serde(default)]
+    pub disabled_agents: Vec<String>,
+    /// Hidden projects: normalized deduplication key mapped to the original path text.
+    #[serde(default)]
+    pub hidden_projects: HashMap<String, String>,
 }
 
 impl AppConfig {
@@ -50,11 +57,12 @@ impl AppConfig {
     /// Persists configuration to the specified path, creating parent directories if needed.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create config directory {}", parent.display()))?;
+            fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create config directory {}", parent.display())
+            })?;
         }
-        let content = serde_json::to_string_pretty(self)
-            .context("failed to serialize ProjPanel config")?;
+        let content =
+            serde_json::to_string_pretty(self).context("failed to serialize ProjPanel config")?;
         let tmp_path = path.with_extension("json.tmp");
         fs::write(&tmp_path, &content)
             .with_context(|| format!("failed to write temp config {}", tmp_path.display()))?;
@@ -70,6 +78,46 @@ impl AppConfig {
         Ok(())
     }
 
+    /// Returns whether the agent is enabled for scanning and display (enabled by default).
+    pub fn is_agent_enabled(&self, agent: AgentKind) -> bool {
+        let id = agent.id();
+        !self.disabled_agents.iter().any(|d| d == id)
+    }
+
+    /// Enables or disables an agent. Returns true when the stored state changed.
+    pub fn set_agent_enabled(&mut self, agent: AgentKind, enabled: bool) -> bool {
+        if self.is_agent_enabled(agent) == enabled {
+            return false;
+        }
+        if enabled {
+            let id = agent.id();
+            self.disabled_agents.retain(|d| d != id);
+        } else {
+            self.disabled_agents.push(agent.id().to_string());
+        }
+        true
+    }
+
+    /// Returns whether the project path is in the hidden list.
+    pub fn is_project_hidden(&self, path: &Path) -> bool {
+        let key = dedup_key(&normalize_path(path));
+        self.hidden_projects.contains_key(&key)
+    }
+
+    /// Adds a project to the hidden list. Returns true when newly added.
+    pub fn hide_project(&mut self, path: &Path) -> bool {
+        let norm = normalize_path(path);
+        let key = dedup_key(&norm);
+        self.hidden_projects
+            .insert(key, norm.to_string_lossy().into_owned())
+            .is_none()
+    }
+
+    /// Removes a project from the hidden list by its deduplication key. Returns true when removed.
+    pub fn unhide_project_key(&mut self, key: &str) -> bool {
+        self.hidden_projects.remove(key).is_some()
+    }
+
     /// Looks up the custom display name for a project path.
     pub fn custom_name_for(&self, path: &Path) -> Option<String> {
         let key = dedup_key(&normalize_path(path));
@@ -83,9 +131,7 @@ impl AppConfig {
     /// Returns true if the stored value changed.
     pub fn set_custom_name(&mut self, path: &Path, name: Option<&str>) -> bool {
         let key = dedup_key(&normalize_path(path));
-        let cleaned = name
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+        let cleaned = name.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
         match cleaned {
             Some(val) => {
@@ -130,5 +176,30 @@ mod tests {
 
         let reloaded = AppConfig::load_from(&cfg_path);
         assert!(reloaded.custom_names.is_empty());
+    }
+
+    #[test]
+    fn persists_agent_switches_and_hidden_projects() {
+        let tmp = tempdir().unwrap();
+        let cfg_path = tmp.path().join("config.json");
+        let proj = PathBuf::from("/Users/demo/project-b/");
+
+        let mut cfg = AppConfig::default();
+        assert!(cfg.is_agent_enabled(AgentKind::Codex));
+        assert!(cfg.set_agent_enabled(AgentKind::Codex, false));
+        assert!(!cfg.set_agent_enabled(AgentKind::Codex, false));
+        assert!(cfg.hide_project(&proj));
+        assert!(!cfg.hide_project(&proj));
+        cfg.save_to(&cfg_path).unwrap();
+
+        let mut loaded = AppConfig::load_from(&cfg_path);
+        assert!(!loaded.is_agent_enabled(AgentKind::Codex));
+        assert!(loaded.is_agent_enabled(AgentKind::ClaudeCode));
+        assert!(loaded.is_project_hidden(Path::new("/Users/demo/project-b")));
+
+        let key = loaded.hidden_projects.keys().next().cloned().unwrap();
+        assert!(loaded.unhide_project_key(&key));
+        assert!(loaded.set_agent_enabled(AgentKind::Codex, true));
+        assert!(loaded.hidden_projects.is_empty() && loaded.disabled_agents.is_empty());
     }
 }

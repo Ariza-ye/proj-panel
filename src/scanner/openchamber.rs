@@ -98,10 +98,7 @@ pub(crate) fn scan_openchamber_dir(base: &Path, by_path: &mut HashMap<PathBuf, A
     }
 }
 
-fn scan_settings_json(
-    settings_file: &Path,
-    by_path: &mut HashMap<PathBuf, AgentProjectEntry>,
-) {
+fn scan_settings_json(settings_file: &Path, by_path: &mut HashMap<PathBuf, AgentProjectEntry>) {
     let fallback_mtime = file_mtime_secs(settings_file);
     let Ok(raw) = fs::read_to_string(settings_file) else {
         return;
@@ -161,10 +158,7 @@ fn scan_settings_json(
     }
 }
 
-fn scan_projects_dir(
-    projects_dir: &Path,
-    by_path: &mut HashMap<PathBuf, AgentProjectEntry>,
-) {
+fn scan_projects_dir(projects_dir: &Path, by_path: &mut HashMap<PathBuf, AgentProjectEntry>) {
     let Ok(entries) = fs::read_dir(projects_dir) else {
         return;
     };
@@ -307,7 +301,11 @@ fn enrich_from_message_search_db(
         }
         if count > 0 {
             let count_u32 = count.min(u32::MAX as i64) as u32;
-            existing.session_count = Some(existing.session_count.map_or(count_u32, |c| c.max(count_u32)));
+            existing.session_count = Some(
+                existing
+                    .session_count
+                    .map_or(count_u32, |c| c.max(count_u32)),
+            );
         }
     }
 

@@ -77,14 +77,16 @@ pub(crate) fn scan_gemini_dir(gemini_dir: &Path) -> Result<Vec<AgentProjectEntry
                     if !p.is_absolute() {
                         continue;
                     }
-                    by_path.entry(p.clone()).or_insert_with(|| AgentProjectEntry {
-                        agent: AgentKind::GeminiCli,
-                        path: p,
-                        display_name: None,
-                        last_active: mtime,
-                        session_count: None,
-                        source: "~/.gemini/trustedFolders.json".to_string(),
-                    });
+                    by_path
+                        .entry(p.clone())
+                        .or_insert_with(|| AgentProjectEntry {
+                            agent: AgentKind::GeminiCli,
+                            path: p,
+                            display_name: None,
+                            last_active: mtime,
+                            session_count: None,
+                            source: "~/.gemini/trustedFolders.json".to_string(),
+                        });
                 }
             }
         }
@@ -114,7 +116,15 @@ mod tests {
 
         let entries = scan_gemini_dir(tmp.path()).unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().any(|e| e.path == PathBuf::from("/Users/demo/web") && e.display_name.is_none()));
-        assert!(entries.iter().all(|e| e.path != PathBuf::from("/Users/demo/blocked")));
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.path == PathBuf::from("/Users/demo/web") && e.display_name.is_none())
+        );
+        assert!(
+            entries
+                .iter()
+                .all(|e| e.path != PathBuf::from("/Users/demo/blocked"))
+        );
     }
 }

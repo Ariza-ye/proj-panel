@@ -2,7 +2,9 @@ use std::borrow::Cow;
 
 use gpui_kit::assets::icon_assets;
 use gpui_kit::component::{Icon, IconName, IconNamed};
-use gpui_kit::{App, AssetSource, IntoElement, ParentElement, Result, SharedString, Styled, div, px, rgb, svg};
+use gpui_kit::{
+    App, AssetSource, IntoElement, ParentElement, Result, SharedString, Styled, div, px, rgb, svg,
+};
 
 use crate::launcher::LauncherKind;
 use crate::model::AgentKind;
@@ -254,8 +256,8 @@ mod tests {
 
     #[test]
     fn all_agent_icons_are_embedded_and_rasterizable_by_gpui() {
-        use std::sync::Arc;
         use gpui_kit::{DevicePixels, Size, SvgRenderer, SvgSize};
+        use std::sync::Arc;
 
         let renderer = SvgRenderer::new(Arc::new(AppAssets));
         let target_size = SvgSize::Size(Size::new(DevicePixels(32), DevicePixels(32)));
@@ -272,7 +274,9 @@ mod tests {
             let image = renderer
                 .render_parsed(&parsed, target_size)
                 .unwrap_or_else(|err| panic!("failed to rasterize {path}: {err}"));
-            let bytes = image.as_bytes(0).expect("rendered image frame should exist");
+            let bytes = image
+                .as_bytes(0)
+                .expect("rendered image frame should exist");
             let total_pixels = bytes.len() / 4;
             let visible_pixels = bytes.chunks_exact(4).filter(|px| px[3] > 0).count();
             assert!(
@@ -284,8 +288,8 @@ mod tests {
 
     #[test]
     fn app_assets_resolves_and_rasterizes_app_icon_glyph() {
-        use std::sync::Arc;
         use gpui_kit::{DevicePixels, Size, SvgRenderer, SvgSize};
+        use std::sync::Arc;
 
         let data = AppAssets
             .load(APP_ICON_GLYPH_ASSET_PATH)
@@ -301,7 +305,9 @@ mod tests {
                 SvgSize::Size(Size::new(DevicePixels(32), DevicePixels(32))),
             )
             .expect("app icon glyph SVG should rasterize");
-        let bytes = image.as_bytes(0).expect("rendered image frame should exist");
+        let bytes = image
+            .as_bytes(0)
+            .expect("rendered image frame should exist");
         let total_pixels = bytes.len() / 4;
         let visible_pixels = bytes.chunks_exact(4).filter(|px| px[3] > 0).count();
         assert!(

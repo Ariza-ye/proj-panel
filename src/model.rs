@@ -32,6 +32,62 @@ pub enum AgentKind {
 }
 
 impl AgentKind {
+    /// Every supported agent in display order.
+    pub const ALL: [AgentKind; 23] = [
+        Self::ClaudeCode,
+        Self::Codex,
+        Self::GeminiCli,
+        Self::OpenCode,
+        Self::OpenChamber,
+        Self::Zed,
+        Self::Cursor,
+        Self::Windsurf,
+        Self::VsCode,
+        Self::Trae,
+        Self::Kiro,
+        Self::Antigravity,
+        Self::Cline,
+        Self::RooCode,
+        Self::IntelliJIdea,
+        Self::PyCharm,
+        Self::WebStorm,
+        Self::GoLand,
+        Self::CLion,
+        Self::PhpStorm,
+        Self::Rider,
+        Self::RustRover,
+        Self::RubyMine,
+    ];
+
+    /// Stable identifier used in persisted configuration.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude_code",
+            Self::Codex => "codex",
+            Self::GeminiCli => "gemini_cli",
+            Self::OpenCode => "opencode",
+            Self::OpenChamber => "openchamber",
+            Self::Zed => "zed",
+            Self::Cursor => "cursor",
+            Self::Windsurf => "windsurf",
+            Self::VsCode => "vscode",
+            Self::Trae => "trae",
+            Self::Kiro => "kiro",
+            Self::Antigravity => "antigravity",
+            Self::Cline => "cline",
+            Self::RooCode => "roo_code",
+            Self::IntelliJIdea => "intellij_idea",
+            Self::PyCharm => "pycharm",
+            Self::WebStorm => "webstorm",
+            Self::GoLand => "goland",
+            Self::CLion => "clion",
+            Self::PhpStorm => "phpstorm",
+            Self::Rider => "rider",
+            Self::RustRover => "rustrover",
+            Self::RubyMine => "rubymine",
+        }
+    }
+
     /// Human-readable display name shown in the UI and CLI output.
     pub fn display_name(self) -> &'static str {
         match self {
@@ -216,6 +272,18 @@ impl ScanReport {
             agent_summaries,
             elapsed_ms: elapsed.as_millis() as u64,
             scanned_at: chrono::Utc::now().timestamp(),
+        }
+    }
+
+    /// Removes a project by path and refreshes per-agent project counts.
+    pub fn remove_project(&mut self, path: &std::path::Path) {
+        self.projects.retain(|p| p.path != path);
+        let projects = &self.projects;
+        for summary in &mut self.agent_summaries {
+            summary.project_count = projects
+                .iter()
+                .filter(|p| p.has_agent(summary.agent))
+                .count();
         }
     }
 

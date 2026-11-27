@@ -91,7 +91,11 @@ mod tests {
             );
             let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
             let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
-            assert_eq!((width, height), (512, 512), "{label} app icon dimensions mismatch");
+            assert_eq!(
+                (width, height),
+                (512, 512),
+                "{label} app icon dimensions mismatch"
+            );
         }
         assert_ne!(
             APP_ICON_LIGHT_PNG, APP_ICON_DARK_PNG,

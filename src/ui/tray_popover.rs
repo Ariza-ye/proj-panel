@@ -154,8 +154,10 @@ impl TrayPopover {
             input.focus(window, cx);
         });
 
-        let search_sub = cx.subscribe_in(&search_input, window, |this, state, event, window, cx| {
-            match event {
+        let search_sub = cx.subscribe_in(
+            &search_input,
+            window,
+            |this, state, event, window, cx| match event {
                 InputEvent::Change => {
                     let next_query = state.read(cx).value().to_string();
                     if next_query != this.query {
@@ -168,8 +170,8 @@ impl TrayPopover {
                     this.launch_first_visible(window, cx);
                 }
                 _ => {}
-            }
-        });
+            },
+        );
 
         let activation_sub = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
@@ -496,136 +498,134 @@ impl TrayPopover {
         let menu_project_path = proj.path.clone();
         let view = cx.entity().downgrade();
 
-        let split = DropdownButton::new(SharedString::from(format!(
-            "pop-open-split-{stable_key}"
-        )))
-        .button(left_button)
-        .menu_accessibility_label("选择打开方式")
-        .xsmall()
-        .outline()
-        .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _window, cx| {
-            let Some(view_entity) = view.upgrade() else {
-                return menu;
-            };
-            let (matched_kinds, app_kinds, terminal_kinds) = {
-                let popover = view_entity.read(cx);
-                let Some(proj_ref) = popover
-                    .report
-                    .projects
-                    .iter()
-                    .find(|p| p.path == menu_project_path)
-                else {
+        let split = DropdownButton::new(SharedString::from(format!("pop-open-split-{stable_key}")))
+            .button(left_button)
+            .menu_accessibility_label("选择打开方式")
+            .xsmall()
+            .outline()
+            .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _window, cx| {
+                let Some(view_entity) = view.upgrade() else {
                     return menu;
                 };
-                let (matched, apps, terminals) =
-                    partition_launchers_for_project(proj_ref, &popover.launchers);
-                (
-                    matched.into_iter().map(|l| l.kind).collect::<Vec<_>>(),
-                    apps.into_iter().map(|l| l.kind).collect::<Vec<_>>(),
-                    terminals.into_iter().map(|l| l.kind).collect::<Vec<_>>(),
-                )
-            };
+                let (matched_kinds, app_kinds, terminal_kinds) = {
+                    let popover = view_entity.read(cx);
+                    let Some(proj_ref) = popover
+                        .report
+                        .projects
+                        .iter()
+                        .find(|p| p.path == menu_project_path)
+                    else {
+                        return menu;
+                    };
+                    let (matched, apps, terminals) =
+                        partition_launchers_for_project(proj_ref, &popover.launchers);
+                    (
+                        matched.into_iter().map(|l| l.kind).collect::<Vec<_>>(),
+                        apps.into_iter().map(|l| l.kind).collect::<Vec<_>>(),
+                        terminals.into_iter().map(|l| l.kind).collect::<Vec<_>>(),
+                    )
+                };
 
-            let add_item = |menu: PopupMenu, kind: LauncherKind, cx: &App| {
-                let path = menu_project_path.clone();
-                let view = view.clone();
-                let is_current = kind == primary_kind;
-                let item = PopupMenuItem::new(kind.display_name())
-                    .icon(launcher_icon(kind, cx))
-                    .checked(is_current)
-                    .on_click(move |_, window, cx| {
-                        if let Some(view) = view.upgrade() {
-                            view.update(cx, |this, cx| {
-                                this.launch_project_and_dismiss(path.clone(), kind, window, cx);
-                            });
-                        }
-                    });
-                menu.item(item)
-            };
+                let add_item = |menu: PopupMenu, kind: LauncherKind, cx: &App| {
+                    let path = menu_project_path.clone();
+                    let view = view.clone();
+                    let is_current = kind == primary_kind;
+                    let item = PopupMenuItem::new(kind.display_name())
+                        .icon(launcher_icon(kind, cx))
+                        .checked(is_current)
+                        .on_click(move |_, window, cx| {
+                            if let Some(view) = view.upgrade() {
+                                view.update(cx, |this, cx| {
+                                    this.launch_project_and_dismiss(path.clone(), kind, window, cx);
+                                });
+                            }
+                        });
+                    menu.item(item)
+                };
 
-            let mut has_prev = false;
-            if !matched_kinds.is_empty() {
-                menu = menu.label("项目关联工具");
-                for kind in matched_kinds {
-                    menu = add_item(menu, kind, cx);
+                let mut has_prev = false;
+                if !matched_kinds.is_empty() {
+                    menu = menu.label("项目关联工具");
+                    for kind in matched_kinds {
+                        menu = add_item(menu, kind, cx);
+                    }
+                    has_prev = true;
                 }
-                has_prev = true;
-            }
-            if !app_kinds.is_empty() {
-                if has_prev {
-                    menu = menu.separator();
+                if !app_kinds.is_empty() {
+                    if has_prev {
+                        menu = menu.separator();
+                    }
+                    menu = menu.label("编辑器与 AI 应用");
+                    for kind in app_kinds {
+                        menu = add_item(menu, kind, cx);
+                    }
+                    has_prev = true;
                 }
-                menu = menu.label("编辑器与 AI 应用");
-                for kind in app_kinds {
-                    menu = add_item(menu, kind, cx);
+                if !terminal_kinds.is_empty() {
+                    if has_prev {
+                        menu = menu.separator();
+                    }
+                    menu = menu.label("终端");
+                    for kind in terminal_kinds {
+                        menu = add_item(menu, kind, cx);
+                    }
                 }
-                has_prev = true;
-            }
-            if !terminal_kinds.is_empty() {
-                if has_prev {
-                    menu = menu.separator();
-                }
-                menu = menu.label("终端");
-                for kind in terminal_kinds {
-                    menu = add_item(menu, kind, cx);
-                }
-            }
 
-            menu = menu.separator();
+                menu = menu.separator();
 
-            let path_dir = menu_project_path.clone();
-            let view_dir = view.clone();
-            menu = menu.item(
-                PopupMenuItem::new(file_manager_label())
-                    .icon(IconName::FolderOpen)
-                    .on_click(move |_, window, cx| {
-                        if let Some(view) = view_dir.upgrade() {
-                            view.update(cx, |this, cx| {
-                                let cb = this.callbacks.on_open_in_file_manager.clone();
-                                this.dismiss(window);
-                                cb(path_dir.clone(), cx);
-                            });
-                        }
-                    }),
-            );
+                let path_dir = menu_project_path.clone();
+                let view_dir = view.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(file_manager_label())
+                        .icon(IconName::FolderOpen)
+                        .on_click(move |_, window, cx| {
+                            if let Some(view) = view_dir.upgrade() {
+                                view.update(cx, |this, cx| {
+                                    let cb = this.callbacks.on_open_in_file_manager.clone();
+                                    this.dismiss(window);
+                                    cb(path_dir.clone(), cx);
+                                });
+                            }
+                        }),
+                );
 
-            let path_copy = menu_project_path.clone();
-            let view_copy = view.clone();
-            menu = menu.item(
-                PopupMenuItem::new("复制路径")
-                    .icon(IconName::Copy)
-                    .on_click(move |_, window, cx| {
-                        if let Some(view) = view_copy.upgrade() {
-                            view.update(cx, |this, cx| {
-                                let cb = this.callbacks.on_copy_path.clone();
-                                this.dismiss(window);
-                                cb(path_copy.clone(), cx);
-                            });
-                        }
-                    }),
-            );
+                let path_copy = menu_project_path.clone();
+                let view_copy = view.clone();
+                menu = menu.item(
+                    PopupMenuItem::new("复制路径")
+                        .icon(IconName::Copy)
+                        .on_click(move |_, window, cx| {
+                            if let Some(view) = view_copy.upgrade() {
+                                view.update(cx, |this, cx| {
+                                    let cb = this.callbacks.on_copy_path.clone();
+                                    this.dismiss(window);
+                                    cb(path_copy.clone(), cx);
+                                });
+                            }
+                        }),
+                );
 
-            let path_reveal = menu_project_path.clone();
-            let view_reveal = view.clone();
-            menu = menu.item(
-                PopupMenuItem::new("在主窗口中查看")
-                    .icon(LucideIconName::ExternalLink)
-                    .on_click(move |_, window, cx| {
-                        if let Some(view) = view_reveal.upgrade() {
-                            view.update(cx, |this, cx| {
-                                let cb = this.callbacks.on_reveal_in_main_window.clone();
-                                this.dismiss(window);
-                                cb(path_reveal.clone(), cx);
-                            });
-                        }
-                    }),
-            );
+                let path_reveal = menu_project_path.clone();
+                let view_reveal = view.clone();
+                menu = menu.item(
+                    PopupMenuItem::new("在主窗口中查看")
+                        .icon(LucideIconName::ExternalLink)
+                        .on_click(move |_, window, cx| {
+                            if let Some(view) = view_reveal.upgrade() {
+                                view.update(cx, |this, cx| {
+                                    let cb = this.callbacks.on_reveal_in_main_window.clone();
+                                    this.dismiss(window);
+                                    cb(path_reveal.clone(), cx);
+                                });
+                            }
+                        }),
+                );
 
-            menu.check_side(Side::Right)
-                .min_w(px(172.0))
-                .max_h(px(280.0))
-                .scrollable(true)
-        });
+                menu.check_side(Side::Right)
+                    .min_w(px(172.0))
+                    .max_h(px(280.0))
+                    .scrollable(true)
+            });
 
         Some(div().flex_none().child(split))
     }
@@ -880,16 +880,11 @@ impl TrayPopover {
                     .gap_1p5()
                     .text_xs()
                     .text_color(cx.theme().muted_foreground)
-                    .child(
-                        div()
-                            .size(px(6.0))
-                            .rounded_full()
-                            .bg(if self.loading {
-                                cx.theme().yellow
-                            } else {
-                                cx.theme().green
-                            }),
-                    )
+                    .child(div().size(px(6.0)).rounded_full().bg(if self.loading {
+                        cx.theme().yellow
+                    } else {
+                        cx.theme().green
+                    }))
                     .child(left_text),
             )
             .child(

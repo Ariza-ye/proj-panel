@@ -178,7 +178,10 @@ mod tests {
     fn formats_memory_units() {
         assert_eq!(format_memory_bytes(512), "512 B");
         assert_eq!(format_memory_bytes(2048), "2 KB");
-        assert_eq!(format_memory_bytes(48 * 1024 * 1024 + 512 * 1024), "48.5 MB");
+        assert_eq!(
+            format_memory_bytes(48 * 1024 * 1024 + 512 * 1024),
+            "48.5 MB"
+        );
         assert_eq!(
             format_memory_bytes(1024 * 1024 * 1024 + 256 * 1024 * 1024),
             "1.25 GB"
@@ -188,17 +191,15 @@ mod tests {
     #[test]
     fn parses_linux_proc_status_vm_rss() {
         let sample = "Name:\tproj-panel\nVmSize:\t  123456 kB\nVmRSS:\t   49152 kB\n";
-        assert_eq!(
-            parse_proc_status_vm_rss_bytes(sample),
-            Some(49152 * 1024)
-        );
+        assert_eq!(parse_proc_status_vm_rss_bytes(sample), Some(49152 * 1024));
         assert_eq!(parse_proc_status_vm_rss_bytes("Name:\tproj-panel\n"), None);
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     #[test]
     fn reads_current_process_memory() {
-        let bytes = current_process_memory_bytes().expect("current process memory should be readable");
+        let bytes =
+            current_process_memory_bytes().expect("current process memory should be readable");
         assert!(bytes > 0);
     }
 

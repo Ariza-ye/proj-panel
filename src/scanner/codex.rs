@@ -201,7 +201,8 @@ impl<'de> Deserialize<'de> for CodexGlobalStateData {
                     } else if key.starts_with(WORKSPACE_ROOT_LABELS_PREFIX)
                         || key == "electron-workspace-root-labels"
                     {
-                        out.workspace_root_label_maps.push(map.next_value::<Value>()?);
+                        out.workspace_root_label_maps
+                            .push(map.next_value::<Value>()?);
                     } else {
                         let _ = map.next_value::<IgnoredAny>()?;
                     }
@@ -444,8 +445,17 @@ mod tests {
                 .find(|e| e.path == PathBuf::from(p))
                 .expect("project should exist")
         };
-        assert_eq!(find("/Users/demo/app-a").display_name.as_deref(), Some("SQLite Renamed"));
-        assert_eq!(find("/Users/demo/app-b").display_name.as_deref(), Some("Global Renamed"));
-        assert_eq!(find("/Users/demo/app-c").display_name.as_deref(), Some("Label Only"));
+        assert_eq!(
+            find("/Users/demo/app-a").display_name.as_deref(),
+            Some("SQLite Renamed")
+        );
+        assert_eq!(
+            find("/Users/demo/app-b").display_name.as_deref(),
+            Some("Global Renamed")
+        );
+        assert_eq!(
+            find("/Users/demo/app-c").display_name.as_deref(),
+            Some("Label Only")
+        );
     }
 }

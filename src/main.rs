@@ -27,9 +27,7 @@ use crate::scanner::ScannerRegistry;
 use crate::scanner::paths::open_in_file_manager;
 use crate::tray::{TrayAnchor, TrayCommand, TrayHandle, compute_popover_bounds};
 use crate::ui::icons::AppAssets;
-use crate::ui::tray_popover::{
-    POPOVER_HEIGHT, POPOVER_WIDTH, TrayPopover, TrayPopoverCallbacks,
-};
+use crate::ui::tray_popover::{POPOVER_HEIGHT, POPOVER_WIDTH, TrayPopover, TrayPopoverCallbacks};
 use crate::ui::window::{ProjectWindow, ProjectWindowCallbacks};
 
 const APP_NAME: &str = "ProjPanel";
@@ -182,7 +180,11 @@ fn handle_tray_command(cmd: TrayCommand, cx: &mut App) {
     }
 }
 
-fn toggle_tray_popover(click_rect: tray_icon::Rect, captured_anchor: Option<TrayAnchor>, cx: &mut App) {
+fn toggle_tray_popover(
+    click_rect: tray_icon::Rect,
+    captured_anchor: Option<TrayAnchor>,
+    cx: &mut App,
+) {
     if close_tray_popover(cx) {
         return;
     }
@@ -348,9 +350,12 @@ fn resolve_popover_placement(
     // Cross-platform fallback using primary display visible bounds and tray click rect.
     let display = cx.primary_display();
     let display_id = display.as_ref().map(|d| d.id());
-    let visible = display
-        .map(|d| d.visible_bounds())
-        .unwrap_or_else(|| Bounds::new(gpui_kit::point(px(0.0), px(0.0)), size(px(1280.0), px(800.0))));
+    let visible = display.map(|d| d.visible_bounds()).unwrap_or_else(|| {
+        Bounds::new(
+            gpui_kit::point(px(0.0), px(0.0)),
+            size(px(1280.0), px(800.0)),
+        )
+    });
 
     let has_click_rect = click_rect.size.width > 0 && click_rect.size.height > 0;
     let anchor = if has_click_rect {
