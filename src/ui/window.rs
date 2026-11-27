@@ -29,8 +29,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Anchor, App, ClipboardItem, Context, Entity, FontWeight, MouseButton, ScrollStrategy,
-    SharedString, Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px, rgb,
-    svg, uniform_list,
+    SharedString, Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px,
+    uniform_list,
 };
 
 use crate::app_icon::apply_dock_icon;
@@ -43,7 +43,7 @@ use crate::memory::{current_process_memory_bytes, format_memory_bytes, trim_proc
 use crate::model::{AgentKind, AggregatedProject, ScanReport};
 use crate::scanner::ScannerRegistry;
 use crate::scanner::paths::{dedup_key, open_in_file_manager};
-use crate::ui::icons::{APP_ICON_GLYPH_ASSET_PATH, AgentIcon, agent_icon};
+use crate::ui::icons::{AgentIcon, agent_icon, launcher_icon, render_app_brand_icon};
 use crate::ui::theme::{agent_accent, agent_color_name, heat_level_color};
 
 const CARD_HEIGHT: f32 = 104.0;
@@ -183,6 +183,17 @@ impl HeatmapCache {
     }
 }
 
+pub type StateChangedCallback =
+    Arc<dyn Fn(Arc<ScanReport>, Arc<Vec<DetectedLauncher>>, bool, &mut App) + Send + Sync>;
+pub type LauncherUsedCallback = Arc<dyn Fn(PathBuf, LauncherKind, &mut App) + Send + Sync>;
+
+/// Callbacks notifying application-level state (such as the system tray) about window updates.
+#[derive(Clone, Default)]
+pub struct ProjectWindowCallbacks {
+    pub on_state_changed: Option<StateChangedCallback>,
+    pub on_launcher_used: Option<LauncherUsedCallback>,
+}
+
 /// Main desktop window built with GPUI Kit components.
 pub struct ProjectWindow {
     report: Arc<ScanReport>,
@@ -210,13 +221,16 @@ pub struct ProjectWindow {
     sort_by: SortBy,
     sidebar_collapsed: bool,
     _subscriptions: Vec<Subscription>,
-    on_report_updated: Option<Arc<dyn Fn(Arc<ScanReport>, &mut gpui_kit::App) + Send + Sync>>,
+    callbacks: ProjectWindowCallbacks,
 }
 
 impl ProjectWindow {
     pub fn new(
         initial_report: Arc<ScanReport>,
-        on_report_updated: Option<Arc<dyn Fn(Arc<ScanReport>, &mut gpui_kit::App) + Send + Sync>>,
+        initial_launchers: Arc<Vec<DetectedLauncher>>,
+        initial_launcher_prefs: HashMap<PathBuf, LauncherKind>,
+        initial_last_launcher: Option<LauncherKind>,
+        callbacks: ProjectWindowCallbacks,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -300,9 +314,9 @@ impl ProjectWindow {
             heatmap_cache,
             filtered_indices: Vec::new(),
             list_scroll_handle: UniformListScrollHandle::new(),
-            launchers: Arc::new(Vec::new()),
-            project_launcher_prefs: HashMap::new(),
-            last_launcher: None,
+            launchers: initial_launchers,
+            project_launcher_prefs: initial_launcher_prefs,
+            last_launcher: initial_last_launcher,
             loading: false,
             memory_usage_text,
             _memory_monitor_task: memory_monitor_task,
@@ -317,11 +331,57 @@ impl ProjectWindow {
             sort_by: SortBy::LastActive,
             sidebar_collapsed: false,
             _subscriptions: vec![search_sub, rename_sub, appearance_sub],
-            on_report_updated,
+            callbacks,
         };
         view.apply_report(initial_report);
         view.trigger_refresh(cx);
         view
+    }
+
+    /// Selects and scrolls to the given project in the main projects view, clearing blocking filters.
+    pub fn focus_project(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.active_view = ActiveView::Projects;
+        self.editing_project_path = None;
+
+        if let Some(proj) = self.report.projects.iter().find(|p| p.path == path) {
+            if !proj.exists {
+                self.show_missing = true;
+            }
+            if self.selected_agent.is_some_and(|a| !proj.has_agent(a)) {
+                self.selected_agent = None;
+            }
+        }
+        if !self.query.is_empty() {
+            self.query.clear();
+            self.search_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+            });
+        }
+
+        self.selected_project_path = Some(path.clone());
+        self.rebuild_filtered(false);
+
+        if let Some(filtered_pos) = self
+            .filtered_indices
+            .iter()
+            .position(|&idx| self.report.projects.get(idx).is_some_and(|p| p.path == path))
+        {
+            self.list_scroll_handle
+                .scroll_to_item_strict(filtered_pos, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
+    /// Syncs a launcher selection made outside the main window (for example from the tray menu).
+    pub fn record_launcher_preference(
+        &mut self,
+        path: PathBuf,
+        launcher: LauncherKind,
+        cx: &mut Context<Self>,
+    ) {
+        self.project_launcher_prefs.insert(path, launcher);
+        self.last_launcher = Some(launcher);
+        cx.notify();
     }
 
     /// Rebuilds precomputed caches whenever a new scan report arrives.
@@ -430,6 +490,13 @@ impl ProjectWindow {
             return;
         }
         self.loading = true;
+        if let Some(cb) = self.callbacks.on_state_changed.clone() {
+            let report = self.report.clone();
+            let launchers = self.launchers.clone();
+            cx.defer(move |cx| {
+                cb(report, launchers, true, cx);
+            });
+        }
         cx.notify();
 
         let custom_names = self.app_config.custom_names.clone();
@@ -443,12 +510,12 @@ impl ProjectWindow {
         cx.spawn(async move |this, cx| {
             let (report, launchers) = task.await;
             let _ = this.update(cx, |panel, cx| {
-                panel.launchers = launchers;
+                panel.launchers = launchers.clone();
                 panel.loading = false;
                 panel.memory_usage_text = sample_memory_usage_text();
                 panel.apply_report(report.clone());
-                if let Some(cb) = &panel.on_report_updated {
-                    cb(report, cx);
+                if let Some(cb) = &panel.callbacks.on_state_changed {
+                    cb(report, launchers, false, cx);
                 }
                 cx.notify();
             });
@@ -525,8 +592,8 @@ impl ProjectWindow {
         }
         let report_arc = Arc::new(updated_report);
         self.apply_report(report_arc.clone());
-        if let Some(cb) = &self.on_report_updated {
-            cb(report_arc, cx);
+        if let Some(cb) = &self.callbacks.on_state_changed {
+            cb(report_arc, self.launchers.clone(), self.loading, cx);
         }
 
         let msg = match next_custom {
@@ -613,6 +680,9 @@ impl ProjectWindow {
         self.project_launcher_prefs
             .insert(project_path.to_path_buf(), launcher.kind);
         self.last_launcher = Some(launcher.kind);
+        if let Some(cb) = &self.callbacks.on_launcher_used {
+            cb(project_path.to_path_buf(), launcher.kind, cx);
+        }
         match open_project_with(launcher, project_path) {
             Ok(()) => {
                 window.push_notification(
@@ -2057,43 +2127,11 @@ impl Render for ProjectWindow {
     }
 }
 
-fn sample_memory_usage_text() -> Option<SharedString> {
+pub(crate) fn sample_memory_usage_text() -> Option<SharedString> {
     current_process_memory_bytes().map(|bytes| SharedString::from(format_memory_bytes(bytes)))
 }
 
-fn render_app_brand_icon(is_dark: bool) -> impl IntoElement {
-    let (bg_color, border_color, glyph_color) = if is_dark {
-        (rgb(0x161f32), rgb(0x2d3f60), rgb(0x3b8eff))
-    } else {
-        (rgb(0xf8fafd), rgb(0xd8e2f0), rgb(0x0b63f6))
-    };
-
-    div()
-        .size(px(20.0))
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(5.0))
-        .bg(bg_color)
-        .border_1()
-        .border_color(border_color)
-        .child(
-            svg()
-                .path(APP_ICON_GLYPH_ASSET_PATH)
-                .size(px(15.0))
-                .text_color(glyph_color),
-        )
-}
-
-fn launcher_icon(kind: LauncherKind, cx: &App) -> Icon {
-    match kind.linked_agent() {
-        Some(agent) => agent_icon(agent, cx),
-        None => Icon::new(IconName::SquareTerminal),
-    }
-}
-
-fn format_relative_time(
+pub(crate) fn format_relative_time(
     ts: Option<i64>,
     now: i64,
     fallback_date: &SharedString,

@@ -22,7 +22,7 @@
 
 - **标准桌面窗口**：带自定义 `TitleBar`、可折叠左侧 `Sidebar`、主内容区、右侧项目详情面板与底部 `StatusBar`，支持拖动、调整尺寸、最小化及亮/暗主题切换。
 - **GPUI Kit 组件体系**：全面采用 `TitleBar`、`Sidebar`、`Input`、`TabBar`、`Button`、`Tag`、`Switch`、`Progress`、`GroupBox`、`Empty`、`StatusBar`、`Notification` 与 `ScrollableElement`。
-- **托盘常驻联动**：关闭主窗口后自动驻留系统状态栏，点击托盘图标或 Dock 图标可随时重新唤起主窗口。
+- **托盘常驻与 GPUI 弹出面板**：关闭主窗口后自动驻留系统状态栏，左键点击状态栏图标弹出 GPUI 绘制的快捷项目列表（支持即时搜索、AI Agent 筛选与多工具一键打开），失去焦点后自动销毁弹窗并主动回收进程内存；右键可快速打开主窗口、重新扫描或退出。
 
 ## 运行方式
 

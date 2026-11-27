@@ -1,13 +1,14 @@
 use std::borrow::Cow;
 
 use gpui_kit::assets::icon_assets;
-use gpui_kit::component::{Icon, IconNamed};
-use gpui_kit::{App, AssetSource, Result, SharedString, Styled};
+use gpui_kit::component::{Icon, IconName, IconNamed};
+use gpui_kit::{App, AssetSource, IntoElement, ParentElement, Result, SharedString, Styled, div, px, rgb, svg};
 
+use crate::launcher::LauncherKind;
 use crate::model::AgentKind;
 use crate::ui::theme::agent_accent;
 
-icon_assets!(ExtraLucideAssets, [Pencil]);
+icon_assets!(ExtraLucideAssets, [Pencil, ExternalLink, LogOut]);
 
 pub const APP_ICON_GLYPH_ASSET_PATH: &str = "icons/app/app-icon-glyph.svg";
 
@@ -187,6 +188,40 @@ pub fn agent_icon(agent: AgentKind, cx: &App) -> Icon {
     Icon::new(AgentIcon(agent)).text_color(agent_accent(agent, cx))
 }
 
+/// Builds an [`Icon`] for an external launcher, reusing linked AI agent brand icons when available.
+pub fn launcher_icon(kind: LauncherKind, cx: &App) -> Icon {
+    match kind.linked_agent() {
+        Some(agent) => agent_icon(agent, cx),
+        None => Icon::new(IconName::SquareTerminal),
+    }
+}
+
+/// Renders the vector ProjPanel brand icon used in window and popover headers.
+pub fn render_app_brand_icon(is_dark: bool) -> impl IntoElement {
+    let (bg_color, border_color, glyph_color) = if is_dark {
+        (rgb(0x161f32), rgb(0x2d3f60), rgb(0x3b8eff))
+    } else {
+        (rgb(0xf8fafd), rgb(0xd8e2f0), rgb(0x0b63f6))
+    };
+
+    div()
+        .size(px(20.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(5.0))
+        .bg(bg_color)
+        .border_1()
+        .border_color(border_color)
+        .child(
+            svg()
+                .path(APP_ICON_GLYPH_ASSET_PATH)
+                .size(px(15.0))
+                .text_color(glyph_color),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,9 +317,15 @@ mod tests {
             .expect("default asset lookup should succeed");
         assert!(icon.is_some(), "default GPUI Kit icon should still resolve");
 
-        let pencil = AppAssets
-            .load(gpui_kit::assets::IconName::Pencil.path().as_ref())
-            .expect("extra Lucide icon lookup should succeed");
-        assert!(pencil.is_some(), "embedded Pencil icon should resolve");
+        for extra in [
+            gpui_kit::assets::IconName::Pencil,
+            gpui_kit::assets::IconName::ExternalLink,
+            gpui_kit::assets::IconName::LogOut,
+        ] {
+            let asset = AppAssets
+                .load(extra.path().as_ref())
+                .expect("extra Lucide icon lookup should succeed");
+            assert!(asset.is_some(), "embedded icon {:?} should resolve", extra);
+        }
     }
 }
