@@ -404,6 +404,7 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.resolve-tag.outputs.tag }}
           IS_PRERELEASE: ${{ needs.resolve-tag.outputs.is_prerelease }}
           IS_DRAFT: ${{ inputs.draft }}
@@ -418,6 +419,7 @@ jobs:
               "$TAG"
               release-assets/*
               --title "ProjPanel ${TAG}"
+              --verify-tag
               --generate-notes
             )
             if [[ "$IS_PRERELEASE" == "true" ]]; then
