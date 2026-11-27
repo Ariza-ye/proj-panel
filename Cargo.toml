@@ -38,3 +38,8 @@ tempfile = "3"
 # while keeping incremental rebuilds of this crate fast.
 [profile.dev.package."*"]
 opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

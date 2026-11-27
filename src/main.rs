@@ -96,6 +96,14 @@ fn main() {
                     };
                     if !has_tray {
                         cx.quit();
+                    } else {
+                        cx.spawn(async move |cx| {
+                            cx.background_executor()
+                                .timer(std::time::Duration::from_millis(300))
+                                .await;
+                            crate::memory::trim_process_memory();
+                        })
+                        .detach();
                     }
                 }
             })
@@ -226,9 +234,11 @@ fn clear_main_window(cx: &mut App) {
 }
 
 fn trigger_background_cache_refresh(cx: &mut App) {
-    let task = cx
-        .background_executor()
-        .spawn(async move { Arc::new(ScannerRegistry::new().scan_all()) });
+    let task = cx.background_executor().spawn(async move {
+        let report = Arc::new(ScannerRegistry::new().scan_all());
+        crate::memory::trim_process_memory();
+        report
+    });
 
     cx.spawn(async move |cx| {
         let report = task.await;

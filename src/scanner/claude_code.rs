@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::model::{AgentKind, AgentProjectEntry};
@@ -26,6 +27,12 @@ impl AgentScanner for ClaudeCodeScanner {
     }
 }
 
+#[derive(Deserialize)]
+struct ClaudeConfigFile {
+    #[serde(default)]
+    projects: Option<Value>,
+}
+
 pub(crate) fn scan_claude_dir(
     claude_json: &Path,
     projects_dir: &Path,
@@ -34,9 +41,10 @@ pub(crate) fn scan_claude_dir(
 
     // 1. Parse `~/.claude.json` top-level `projects` map (authoritative exact paths).
     if claude_json.is_file() {
-        if let Ok(content) = fs::read_to_string(claude_json) {
-            if let Ok(root) = serde_json::from_str::<Value>(&content) {
-                if let Some(projects) = root.get("projects").and_then(|v| v.as_object()) {
+        if let Ok(file) = File::open(claude_json) {
+            let reader = BufReader::new(file);
+            if let Ok(config) = serde_json::from_reader::<_, ClaudeConfigFile>(reader) {
+                if let Some(projects) = config.projects.as_ref().and_then(|v| v.as_object()) {
                     let fallback_mtime = file_mtime_secs(claude_json);
                     for (raw_path, meta) in projects {
                         let p = normalize_path(Path::new(raw_path));

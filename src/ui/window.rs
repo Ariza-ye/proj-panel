@@ -29,8 +29,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Anchor, App, ClipboardItem, Context, Entity, FontWeight, MouseButton, ScrollStrategy,
-    SharedString, Subscription, Task, UniformListScrollHandle, Window, div, img, prelude::*, px,
-    uniform_list,
+    SharedString, Subscription, Task, UniformListScrollHandle, Window, div, prelude::*, px, rgb,
+    svg, uniform_list,
 };
 
 use crate::app_icon::apply_dock_icon;
@@ -39,18 +39,18 @@ use crate::launcher::{
     DetectedLauncher, LauncherKind, detect_installed_launchers, open_project_with,
     partition_launchers_for_project, resolve_primary_launcher,
 };
-use crate::memory::{current_process_memory_bytes, format_memory_bytes};
+use crate::memory::{current_process_memory_bytes, format_memory_bytes, trim_process_memory};
 use crate::model::{AgentKind, AggregatedProject, ScanReport};
 use crate::scanner::ScannerRegistry;
 use crate::scanner::paths::{dedup_key, open_in_file_manager};
-use crate::ui::icons::{AgentIcon, agent_icon, app_icon_asset_path};
+use crate::ui::icons::{APP_ICON_GLYPH_ASSET_PATH, AgentIcon, agent_icon};
 use crate::ui::theme::{agent_accent, agent_color_name, heat_level_color};
 
 const CARD_HEIGHT: f32 = 104.0;
 const MAX_CARD_BADGES: usize = 5;
 const HEATMAP_WEEKS: usize = 24;
 const HEATMAP_DAYS: usize = 7;
-const MEMORY_POLL_INTERVAL_SECS: u64 = 2;
+const MEMORY_POLL_INTERVAL_SECS: u64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveView {
@@ -256,6 +256,24 @@ impl ProjectWindow {
         let heatmap_cache = HeatmapCache::from_report(&empty_report);
         let memory_usage_text = sample_memory_usage_text();
         let memory_monitor_task = cx.spawn(async move |this, cx| {
+            // Reclaim temporary startup allocation fragments shortly after initial layout settles.
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(800))
+                .await;
+            trim_process_memory();
+            let initial_after_trim = sample_memory_usage_text();
+            if this
+                .update(cx, |panel, cx| {
+                    if panel.memory_usage_text != initial_after_trim {
+                        panel.memory_usage_text = initial_after_trim;
+                        cx.notify();
+                    }
+                })
+                .is_err()
+            {
+                return;
+            }
+
             loop {
                 cx.background_executor()
                     .timer(std::time::Duration::from_secs(MEMORY_POLL_INTERVAL_SECS))
@@ -418,6 +436,7 @@ impl ProjectWindow {
         let task = cx.background_executor().spawn(async move {
             let report = Arc::new(ScannerRegistry::new().scan_all_with_custom_names(&custom_names));
             let launchers = Arc::new(detect_installed_launchers());
+            trim_process_memory();
             (report, launchers)
         });
 
@@ -788,11 +807,7 @@ impl ProjectWindow {
                                     cx.notify();
                                 })),
                         )
-                        .child(
-                            img(app_icon_asset_path(is_dark))
-                                .size(px(20.0))
-                                .flex_shrink_0(),
-                        )
+                        .child(render_app_brand_icon(is_dark))
                         .child(
                             div()
                                 .text_sm()
@@ -2044,6 +2059,31 @@ impl Render for ProjectWindow {
 
 fn sample_memory_usage_text() -> Option<SharedString> {
     current_process_memory_bytes().map(|bytes| SharedString::from(format_memory_bytes(bytes)))
+}
+
+fn render_app_brand_icon(is_dark: bool) -> impl IntoElement {
+    let (bg_color, border_color, glyph_color) = if is_dark {
+        (rgb(0x161f32), rgb(0x2d3f60), rgb(0x3b8eff))
+    } else {
+        (rgb(0xf8fafd), rgb(0xd8e2f0), rgb(0x0b63f6))
+    };
+
+    div()
+        .size(px(20.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(5.0))
+        .bg(bg_color)
+        .border_1()
+        .border_color(border_color)
+        .child(
+            svg()
+                .path(APP_ICON_GLYPH_ASSET_PATH)
+                .size(px(15.0))
+                .text_color(glyph_color),
+        )
 }
 
 fn launcher_icon(kind: LauncherKind, cx: &App) -> Icon {

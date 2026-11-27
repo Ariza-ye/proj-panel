@@ -5,6 +5,11 @@ pub fn current_process_memory_bytes() -> Option<u64> {
     current_process_memory_bytes_impl()
 }
 
+/// Releases unused allocator pages back to the operating system where supported.
+pub fn trim_process_memory() {
+    trim_process_memory_impl();
+}
+
 /// Formats a byte count into a human-readable memory size string using binary units.
 pub fn format_memory_bytes(bytes: u64) -> String {
     const KIB: f64 = 1024.0;
@@ -126,6 +131,33 @@ fn current_process_memory_bytes_impl() -> Option<u64> {
     None
 }
 
+#[cfg(target_os = "macos")]
+fn trim_process_memory_impl() {
+    use std::ffi::c_void;
+
+    unsafe extern "C" {
+        fn malloc_zone_pressure_relief(zone: *mut c_void, goal: usize) -> usize;
+    }
+
+    unsafe {
+        let _ = malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
+    }
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_process_memory_impl() {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+
+    unsafe {
+        let _ = malloc_trim(0);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
+fn trim_process_memory_impl() {}
+
 #[cfg(any(target_os = "linux", test))]
 fn parse_proc_status_vm_rss_bytes(status: &str) -> Option<u64> {
     for line in status.lines() {
@@ -168,5 +200,12 @@ mod tests {
     fn reads_current_process_memory() {
         let bytes = current_process_memory_bytes().expect("current process memory should be readable");
         assert!(bytes > 0);
+    }
+
+    #[test]
+    fn trims_process_memory_safely() {
+        let scratch = vec![0u8; 256 * 1024];
+        drop(scratch);
+        trim_process_memory();
     }
 }

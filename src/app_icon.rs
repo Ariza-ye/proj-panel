@@ -15,14 +15,47 @@ pub const fn icon_png_bytes(is_dark: bool) -> &'static [u8] {
     }
 }
 
+/// Returns true when the executable runs inside a packaged macOS `.app` bundle
+/// that already provides its own icon resources.
+#[cfg(target_os = "macos")]
+fn running_inside_bundled_app() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(macos_dir) = exe.parent() else {
+        return false;
+    };
+    let Some(contents_dir) = macos_dir.parent() else {
+        return false;
+    };
+    macos_dir.file_name().is_some_and(|n| n == "MacOS")
+        && contents_dir.file_name().is_some_and(|n| n == "Contents")
+        && contents_dir.join("Resources/AppIcon.icns").is_file()
+}
+
 /// Applies the light or dark application icon to the macOS Dock at runtime.
 ///
 /// Must be called on the main thread. On non-macOS platforms this is a no-op.
 #[cfg(target_os = "macos")]
 pub fn apply_dock_icon(is_dark: bool) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
     use objc2::{AnyThread, MainThreadMarker};
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
+
+    static LAST_APPLIED_MODE: AtomicU8 = AtomicU8::new(0);
+    let target_mode = if is_dark { 2 } else { 1 };
+    if LAST_APPLIED_MODE.load(Ordering::Relaxed) == target_mode {
+        return;
+    }
+
+    // Packaged `.app` bundles already ship adaptive light/dark icons via Assets.car and AppIcon.icns.
+    // Avoid overriding the Dock icon on initial startup so AppKit does not allocate an extra ~8 MB CGImage backing store.
+    if LAST_APPLIED_MODE.load(Ordering::Relaxed) == 0 && running_inside_bundled_app() {
+        LAST_APPLIED_MODE.store(target_mode, Ordering::Relaxed);
+        return;
+    }
 
     let Some(mtm) = MainThreadMarker::new() else {
         return;
@@ -36,6 +69,7 @@ pub fn apply_dock_icon(is_dark: bool) {
     unsafe {
         app.setApplicationIconImage(Some(&image));
     }
+    LAST_APPLIED_MODE.store(target_mode, Ordering::Relaxed);
 }
 
 /// No-op placeholder on non-macOS platforms.

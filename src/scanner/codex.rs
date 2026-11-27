@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use rusqlite::{Connection, OpenFlags};
+use serde::Deserialize;
+use serde::de::{IgnoredAny, MapAccess, Visitor};
 use serde_json::Value;
 
 use crate::model::{AgentKind, AgentProjectEntry};
@@ -168,16 +170,61 @@ fn read_codex_state_sqlite(
     Ok(())
 }
 
+#[derive(Default)]
+struct CodexGlobalStateData {
+    local_projects: Option<Value>,
+    workspace_root_label_maps: Vec<Value>,
+}
+
+impl<'de> Deserialize<'de> for CodexGlobalStateData {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct RootVisitor;
+
+        impl<'de> Visitor<'de> for RootVisitor {
+            type Value = CodexGlobalStateData;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a Codex global state object")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut out = CodexGlobalStateData::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "local-projects" {
+                        out.local_projects = Some(map.next_value::<Value>()?);
+                    } else if key.starts_with(WORKSPACE_ROOT_LABELS_PREFIX)
+                        || key == "electron-workspace-root-labels"
+                    {
+                        out.workspace_root_label_maps.push(map.next_value::<Value>()?);
+                    } else {
+                        let _ = map.next_value::<IgnoredAny>()?;
+                    }
+                }
+                Ok(out)
+            }
+        }
+
+        deserializer.deserialize_map(RootVisitor)
+    }
+}
+
 fn read_codex_global_state(file_path: &Path, acc: &mut HashMap<PathBuf, CodexProjectAcc>) {
-    let Ok(raw) = fs::read_to_string(file_path) else {
+    let Ok(file) = File::open(file_path) else {
         return;
     };
-    let Ok(Value::Object(root)) = serde_json::from_str::<Value>(&raw) else {
+    let reader = BufReader::new(file);
+    let Ok(state) = serde_json::from_reader::<_, CodexGlobalStateData>(reader) else {
         return;
     };
     let fallback_ts = file_mtime_secs(file_path);
 
-    if let Some(local_projects) = root.get("local-projects").and_then(|v| v.as_object()) {
+    if let Some(local_projects) = state.local_projects.as_ref().and_then(|v| v.as_object()) {
         for proj in local_projects.values() {
             let name = proj
                 .get("name")
@@ -208,11 +255,7 @@ fn read_codex_global_state(file_path: &Path, acc: &mut HashMap<PathBuf, CodexPro
         }
     }
 
-    for (key, value) in &root {
-        if !key.starts_with(WORKSPACE_ROOT_LABELS_PREFIX) && key != "electron-workspace-root-labels"
-        {
-            continue;
-        }
+    for value in &state.workspace_root_label_maps {
         if let Some(labels) = value.as_object() {
             for (path_str, label_val) in labels {
                 let Some(label) = label_val.as_str() else {

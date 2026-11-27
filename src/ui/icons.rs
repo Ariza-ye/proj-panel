@@ -4,28 +4,17 @@ use gpui_kit::assets::icon_assets;
 use gpui_kit::component::{Icon, IconNamed};
 use gpui_kit::{App, AssetSource, Result, SharedString, Styled};
 
-use crate::app_icon::{APP_ICON_DARK_PNG, APP_ICON_LIGHT_PNG};
 use crate::model::AgentKind;
 use crate::ui::theme::agent_accent;
 
 icon_assets!(ExtraLucideAssets, [Pencil]);
 
-pub const APP_ICON_LIGHT_ASSET_PATH: &str = "icons/app/app-icon-light.png";
-pub const APP_ICON_DARK_ASSET_PATH: &str = "icons/app/app-icon-dark.png";
+pub const APP_ICON_GLYPH_ASSET_PATH: &str = "icons/app/app-icon-glyph.svg";
 
-/// Returns the bundled asset path of the application icon for the given theme mode.
-pub const fn app_icon_asset_path(is_dark: bool) -> &'static str {
-    if is_dark {
-        APP_ICON_DARK_ASSET_PATH
-    } else {
-        APP_ICON_LIGHT_ASSET_PATH
-    }
-}
-
-const APP_ICON_ASSETS: &[(&str, &[u8])] = &[
-    (APP_ICON_LIGHT_ASSET_PATH, APP_ICON_LIGHT_PNG),
-    (APP_ICON_DARK_ASSET_PATH, APP_ICON_DARK_PNG),
-];
+const APP_ICON_ASSETS: &[(&str, &[u8])] = &[(
+    APP_ICON_GLYPH_ASSET_PATH,
+    include_bytes!("../../assets/icons/app/app-icon-glyph.svg"),
+)];
 
 const AGENT_ICON_ASSETS: &[(&str, &[u8])] = &[
     (
@@ -259,15 +248,31 @@ mod tests {
     }
 
     #[test]
-    fn app_assets_resolves_light_and_dark_app_icons() {
-        for is_dark in [false, true] {
-            let path = app_icon_asset_path(is_dark);
-            let data = AppAssets
-                .load(path)
-                .expect("app icon lookup should succeed")
-                .expect("app icon asset should exist");
-            assert!(data.starts_with(b"\x89PNG\r\n\x1a\n"));
-        }
+    fn app_assets_resolves_and_rasterizes_app_icon_glyph() {
+        use std::sync::Arc;
+        use gpui_kit::{DevicePixels, Size, SvgRenderer, SvgSize};
+
+        let data = AppAssets
+            .load(APP_ICON_GLYPH_ASSET_PATH)
+            .expect("app icon lookup should succeed")
+            .expect("app icon glyph asset should exist");
+        let renderer = SvgRenderer::new(Arc::new(AppAssets));
+        let parsed = renderer
+            .parse_svg(&data)
+            .expect("app icon glyph SVG should parse");
+        let image = renderer
+            .render_parsed(
+                &parsed,
+                SvgSize::Size(Size::new(DevicePixels(32), DevicePixels(32))),
+            )
+            .expect("app icon glyph SVG should rasterize");
+        let bytes = image.as_bytes(0).expect("rendered image frame should exist");
+        let total_pixels = bytes.len() / 4;
+        let visible_pixels = bytes.chunks_exact(4).filter(|px| px[3] > 0).count();
+        assert!(
+            visible_pixels > total_pixels / 20 && visible_pixels < total_pixels * 95 / 100,
+            "app icon glyph rendered with unexpected alpha coverage: {visible_pixels}/{total_pixels}"
+        );
     }
 
     #[test]
