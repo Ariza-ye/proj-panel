@@ -118,7 +118,7 @@ impl LauncherKind {
     }
 
     /// Full label displayed in dropdown menus and notifications.
-    pub const fn display_name(self) -> &'static str {
+    pub fn display_name(self) -> &'static str {
         match self {
             Self::VsCode => "VS Code",
             Self::Cursor => "Cursor",
@@ -154,18 +154,18 @@ impl LauncherKind {
                 }
                 #[cfg(target_os = "windows")]
                 {
-                    "终端"
+                    tr!("终端", "Terminal")
                 }
                 #[cfg(all(unix, not(target_os = "macos")))]
                 {
-                    "系统终端"
+                    tr!("系统终端", "System Terminal")
                 }
             }
         }
     }
 
     /// Compact label used inside the split button to prevent crowding narrow project cards.
-    pub const fn short_label(self) -> &'static str {
+    pub fn short_label(self) -> &'static str {
         match self {
             Self::VsCode => "VS Code",
             Self::Cursor => "Cursor",
@@ -194,7 +194,7 @@ impl LauncherKind {
             Self::WezTerm => "WezTerm",
             Self::Warp => "Warp",
             Self::Alacritty => "Alacritty",
-            Self::SystemTerminal => "终端",
+            Self::SystemTerminal => tr!("终端", "Terminal"),
         }
     }
 

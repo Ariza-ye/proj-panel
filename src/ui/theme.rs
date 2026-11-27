@@ -1,7 +1,31 @@
-use gpui_kit::component::{ActiveTheme, ColorName};
-use gpui_kit::{App, Hsla};
+use std::rc::Rc;
 
+use gpui_kit::component::{ActiveTheme, ColorName, Theme};
+use gpui_kit::{App, Hsla, SharedString, px};
+
+use crate::config::AppConfig;
 use crate::model::AgentKind;
+
+/// 应用界面字号和字体，并在切换浅色或深色主题时保留它们。
+pub fn apply_ui_typography(config: &AppConfig, cx: &mut App) {
+    let size = f32::from(config.effective_ui_font_size());
+    let family = config
+        .ui_font_family
+        .as_ref()
+        .filter(|family| cx.text_system().all_font_names().contains(family))
+        .map(|family| SharedString::from(family.clone()))
+        .unwrap_or_else(|| ".SystemUIFont".into());
+
+    Theme::update(cx, |theme| {
+        for appearance in [&mut theme.light_theme, &mut theme.dark_theme] {
+            let appearance = Rc::make_mut(appearance);
+            appearance.font_size = Some(size);
+            appearance.font_family = Some(family.clone());
+        }
+        theme.font_size = px(size);
+        theme.font_family = family;
+    });
+}
 
 /// Maps each supported AI agent to a semantic GPUI Kit color scale.
 pub fn agent_color_name(agent: AgentKind) -> ColorName {

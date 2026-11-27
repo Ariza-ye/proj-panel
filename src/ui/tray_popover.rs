@@ -20,7 +20,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::{
     Anchor, App, ClipboardItem, Context, Entity, FontWeight, KeyDownEvent, ScrollStrategy,
-    SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
+    SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, rems,
+    uniform_list,
 };
 
 use crate::app_icon::apply_dock_icon;
@@ -35,8 +36,6 @@ use crate::ui::window::{format_relative_time, sample_memory_usage_text};
 pub const POPOVER_WIDTH: f32 = 408.0;
 pub const POPOVER_HEIGHT: f32 = 520.0;
 
-// Two-line compact card: 16px vertical padding + 2px border + 24px top row + 4px gap + 18px bottom row = 64px.
-const ROW_CARD_HEIGHT: f32 = 64.0;
 const MAX_ROW_AGENT_ICONS: usize = 4;
 const BLUR_ARM_GRACE: Duration = Duration::from_millis(120);
 
@@ -94,7 +93,7 @@ impl PopoverProjectCache {
             .last_active
             .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
             .map(|dt| SharedString::from(dt.with_timezone(&Local).format("%Y-%m-%d").to_string()))
-            .unwrap_or_else(|| SharedString::from("较早"));
+            .unwrap_or_else(|| SharedString::from(tr!("较早", "Earlier")));
 
         Self {
             name: SharedString::from(proj.name.clone()),
@@ -147,7 +146,10 @@ impl TrayPopover {
 
         let search_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("搜索项目、路径或 Agent... (Enter 快速打开)")
+                .placeholder(tr!(
+                    "搜索项目、路径或 Agent... (Enter 快速打开)",
+                    "Search projects, paths or Agents... (Enter to open)"
+                ))
                 .clean_on_escape()
         });
         search_input.update(cx, |input, cx| {
@@ -337,9 +339,9 @@ impl TrayPopover {
     fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let is_dark = cx.theme().is_dark();
         let count_badge = if self.loading && self.existing_count == 0 {
-            "扫描中...".to_string()
+            tr!("扫描中...", "Scanning...").to_string()
         } else {
-            format!("{} 个项目", self.existing_count)
+            tr_fmt!("{} 个项目", "{} projects", self.existing_count)
         };
 
         h_flex()
@@ -374,7 +376,7 @@ impl TrayPopover {
                             .xsmall()
                             .icon(IconName::RefreshCw)
                             .loading(self.loading)
-                            .tooltip("立即重新扫描")
+                            .tooltip(tr!("立即重新扫描", "Rescan now"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 let cb = this.callbacks.on_refresh.clone();
                                 cb(cx);
@@ -385,8 +387,8 @@ impl TrayPopover {
                             .outline()
                             .xsmall()
                             .icon(LucideIconName::ExternalLink)
-                            .label("主窗口")
-                            .tooltip("打开完整桌面主窗口")
+                            .label(tr!("主窗口", "Main window"))
+                            .tooltip(tr!("打开完整桌面主窗口", "Open the full desktop window"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 let cb = this.callbacks.on_open_main_window.clone();
                                 this.dismiss(window);
@@ -432,9 +434,15 @@ impl TrayPopover {
             .ghost()
             .xsmall()
             .icon(IconName::ChevronDown)
-            .tooltip("查看其他软件自定义名称（点击复制）")
+            .tooltip(tr!(
+                "查看其他软件自定义名称（点击复制）",
+                "View custom names from other apps (click to copy)"
+            ))
             .dropdown_menu_with_anchor(Anchor::TopLeft, move |mut menu, _window, cx| {
-                menu = menu.label("其他软件自定义名称（点击复制）");
+                menu = menu.label(tr!(
+                    "其他软件自定义名称（点击复制）",
+                    "Custom names from other apps (click to copy)"
+                ));
                 for (idx, item) in external_names.iter().enumerate() {
                     let agent = item.agent;
                     let name_to_copy = item.name.clone();
@@ -445,8 +453,9 @@ impl TrayPopover {
                         .on_click(move |_, window, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(name_to_copy.clone()));
                             window.push_notification(
-                                Notification::success(format!(
+                                Notification::success(tr_fmt!(
                                     "已复制名称（{}）：{}",
+                                    "Name copied ({}): {}",
                                     agent.short_label(),
                                     name_to_copy
                                 )),
@@ -489,7 +498,11 @@ impl TrayPopover {
         )))
         .icon(launcher_icon(primary_kind, cx))
         .label(primary_kind.short_label())
-        .tooltip(format!("使用 {} 打开项目", primary_kind.display_name()))
+        .tooltip(tr_fmt!(
+            "使用 {} 打开项目",
+            "Open project with {}",
+            primary_kind.display_name()
+        ))
         .on_click(cx.listener(move |this, _, window, cx| {
             cx.stop_propagation();
             this.launch_project_and_dismiss(primary_path.clone(), primary_kind, window, cx);
@@ -500,7 +513,7 @@ impl TrayPopover {
 
         let split = DropdownButton::new(SharedString::from(format!("pop-open-split-{stable_key}")))
             .button(left_button)
-            .menu_accessibility_label("选择打开方式")
+            .menu_accessibility_label(tr!("选择打开方式", "Choose how to open"))
             .xsmall()
             .outline()
             .dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _window, cx| {
@@ -545,7 +558,7 @@ impl TrayPopover {
 
                 let mut has_prev = false;
                 if !matched_kinds.is_empty() {
-                    menu = menu.label("项目关联工具");
+                    menu = menu.label(tr!("项目关联工具", "Project-linked tools"));
                     for kind in matched_kinds {
                         menu = add_item(menu, kind, cx);
                     }
@@ -555,7 +568,7 @@ impl TrayPopover {
                     if has_prev {
                         menu = menu.separator();
                     }
-                    menu = menu.label("编辑器与 AI 应用");
+                    menu = menu.label(tr!("编辑器与 AI 应用", "Editors & AI apps"));
                     for kind in app_kinds {
                         menu = add_item(menu, kind, cx);
                     }
@@ -565,7 +578,7 @@ impl TrayPopover {
                     if has_prev {
                         menu = menu.separator();
                     }
-                    menu = menu.label("终端");
+                    menu = menu.label(tr!("终端", "Terminal"));
                     for kind in terminal_kinds {
                         menu = add_item(menu, kind, cx);
                     }
@@ -592,7 +605,7 @@ impl TrayPopover {
                 let path_copy = menu_project_path.clone();
                 let view_copy = view.clone();
                 menu = menu.item(
-                    PopupMenuItem::new("复制路径")
+                    PopupMenuItem::new(tr!("复制路径", "Copy path"))
                         .icon(IconName::Copy)
                         .on_click(move |_, window, cx| {
                             if let Some(view) = view_copy.upgrade() {
@@ -608,7 +621,7 @@ impl TrayPopover {
                 let path_reveal = menu_project_path.clone();
                 let view_reveal = view.clone();
                 menu = menu.item(
-                    PopupMenuItem::new("在主窗口中查看")
+                    PopupMenuItem::new(tr!("在主窗口中查看", "Reveal in main window"))
                         .icon(LucideIconName::ExternalLink)
                         .on_click(move |_, window, cx| {
                             if let Some(view) = view_reveal.upgrade() {
@@ -658,7 +671,7 @@ impl TrayPopover {
         let card = v_flex()
             .id(SharedString::from(format!("popover-proj-{proj_idx}")))
             .w_full()
-            .h(px(ROW_CARD_HEIGHT))
+            .h(rems(4.0))
             .min_w_0()
             .overflow_hidden()
             .justify_between()
@@ -672,7 +685,7 @@ impl TrayPopover {
             .child(
                 h_flex()
                     .w_full()
-                    .h(px(24.0))
+                    .h(rems(1.5))
                     .items_center()
                     .justify_between()
                     .gap_2()
@@ -728,7 +741,7 @@ impl TrayPopover {
             .child(
                 h_flex()
                     .w_full()
-                    .h(px(18.0))
+                    .h(rems(1.125))
                     .items_center()
                     .justify_between()
                     .gap_2()
@@ -783,16 +796,25 @@ impl TrayPopover {
                                         .child(Icon::new(IconName::Inbox)),
                                 )
                                 .title(EmptyTitle::new().child(if self.loading {
-                                    "正在扫描项目..."
+                                    tr!("正在扫描项目...", "Scanning projects...")
                                 } else {
-                                    "没有匹配的项目"
+                                    tr!("没有匹配的项目", "No matching projects")
                                 }))
                                 .description(EmptyDescription::new().child(if self.loading {
-                                    "正在读取各 AI Agent 与编辑器的工作区记录。"
+                                    tr!(
+                                        "正在读取各 AI Agent 与编辑器的工作区记录。",
+                                        "Reading workspace records of AI Agents and editors."
+                                    )
                                 } else if has_filter {
-                                    "尝试调整搜索关键词。"
+                                    tr!(
+                                        "尝试调整搜索关键词。",
+                                        "Try adjusting the search keywords."
+                                    )
                                 } else {
-                                    "未在本机检测到可用的项目目录。"
+                                    tr!(
+                                        "未在本机检测到可用的项目目录。",
+                                        "No usable project directories found on this machine."
+                                    )
                                 })),
                         )
                         .when(has_filter && !self.loading, |empty| {
@@ -801,7 +823,7 @@ impl TrayPopover {
                                     Button::new("popover-reset-filters")
                                         .outline()
                                         .xsmall()
-                                        .label("清空搜索")
+                                        .label(tr!("清空搜索", "Clear search"))
                                         .on_click(cx.listener(|this, _, window, cx| {
                                             this.query.clear();
                                             this.rebuild_filtered(true);
@@ -853,13 +875,15 @@ impl TrayPopover {
 
     fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let left_text = match &self.memory_usage_text {
-            Some(mem) => format!(
+            Some(mem) => tr_fmt!(
                 "显示 {} / {} · 内存 {mem}",
+                "Showing {} / {} · Memory {mem}",
                 self.filtered_indices.len(),
                 self.existing_count
             ),
-            None => format!(
+            None => tr_fmt!(
                 "显示 {} / {} 个项目",
+                "Showing {} / {} projects",
                 self.filtered_indices.len(),
                 self.existing_count
             ),
@@ -892,8 +916,8 @@ impl TrayPopover {
                     .ghost()
                     .xsmall()
                     .icon(LucideIconName::LogOut)
-                    .label("退出")
-                    .tooltip("退出 ProjPanel")
+                    .label(tr!("退出", "Quit"))
+                    .tooltip(tr!("退出 ProjPanel", "Quit ProjPanel"))
                     .on_click(cx.listener(|this, _, window, cx| {
                         let cb = this.callbacks.on_quit.clone();
                         this.dismiss(window);
@@ -927,14 +951,14 @@ impl Render for TrayPopover {
 fn file_manager_label() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        "在访达中打开"
+        tr!("在访达中打开", "Reveal in Finder")
     }
     #[cfg(target_os = "windows")]
     {
-        "在资源管理器中打开"
+        tr!("在资源管理器中打开", "Open in File Explorer")
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        "在文件管理器中打开"
+        tr!("在文件管理器中打开", "Open in file manager")
     }
 }

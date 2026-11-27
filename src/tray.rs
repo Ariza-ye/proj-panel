@@ -48,9 +48,30 @@ pub struct TrayAnchor {
 /// Owns the live `TrayIcon` handle; dropping this struct removes the status bar icon.
 pub struct TrayHandle {
     _tray_icon: TrayIcon,
+    item_open: MenuItem,
+    item_refresh: MenuItem,
+    item_quit: MenuItem,
+}
+
+fn tray_tooltip() -> &'static str {
+    tr!(
+        "ProjPanel — AI Agent 项目汇总",
+        "ProjPanel — AI Agent project overview"
+    )
 }
 
 impl TrayHandle {
+    /// Re-applies the current interface language to the tray tooltip and context menu.
+    pub fn apply_language(&self) {
+        self.item_open
+            .set_text(tr!("打开主窗口", "Open main window"));
+        self.item_refresh
+            .set_text(tr!("立即重新扫描", "Rescan now"));
+        self.item_quit
+            .set_text(tr!("退出 ProjPanel", "Quit ProjPanel"));
+        let _ = self._tray_icon.set_tooltip(Some(tray_tooltip()));
+    }
+
     /// Initializes the cross-platform system tray icon and returns an async command receiver.
     ///
     /// Left click toggles the GPUI project popover; right click opens the minimal context menu.
@@ -59,10 +80,24 @@ impl TrayHandle {
         let (tx, rx) = mpsc::unbounded();
 
         let menu = Menu::new();
-        let item_open = MenuItem::with_id(MenuId::new(MENU_ID_OPEN), "打开主窗口", true, None);
-        let item_refresh =
-            MenuItem::with_id(MenuId::new(MENU_ID_REFRESH), "立即重新扫描", true, None);
-        let item_quit = MenuItem::with_id(MenuId::new(MENU_ID_QUIT), "退出 ProjPanel", true, None);
+        let item_open = MenuItem::with_id(
+            MenuId::new(MENU_ID_OPEN),
+            tr!("打开主窗口", "Open main window"),
+            true,
+            None,
+        );
+        let item_refresh = MenuItem::with_id(
+            MenuId::new(MENU_ID_REFRESH),
+            tr!("立即重新扫描", "Rescan now"),
+            true,
+            None,
+        );
+        let item_quit = MenuItem::with_id(
+            MenuId::new(MENU_ID_QUIT),
+            tr!("退出 ProjPanel", "Quit ProjPanel"),
+            true,
+            None,
+        );
         menu.append_items(&[
             &item_open,
             &item_refresh,
@@ -74,7 +109,7 @@ impl TrayHandle {
         let icon = build_tray_icon_rgba().context("failed to build tray icon bitmap")?;
 
         let mut builder = TrayIconBuilder::new()
-            .with_tooltip("ProjPanel — AI Agent 项目汇总")
+            .with_tooltip(tray_tooltip())
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
             .with_menu_on_right_click(true);
@@ -135,6 +170,9 @@ impl TrayHandle {
         Ok((
             Self {
                 _tray_icon: tray_icon,
+                item_open,
+                item_refresh,
+                item_quit,
             },
             rx,
         ))

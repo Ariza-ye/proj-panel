@@ -1,3 +1,5 @@
+#[macro_use]
+mod i18n;
 mod app_icon;
 mod config;
 mod launcher;
@@ -27,6 +29,7 @@ use crate::scanner::ScannerRegistry;
 use crate::scanner::paths::open_in_file_manager;
 use crate::tray::{TrayAnchor, TrayCommand, TrayHandle, compute_popover_bounds};
 use crate::ui::icons::AppAssets;
+use crate::ui::theme::apply_ui_typography;
 use crate::ui::tray_popover::{POPOVER_HEIGHT, POPOVER_WIDTH, TrayPopover, TrayPopoverCallbacks};
 use crate::ui::window::{ProjectWindow, ProjectWindowCallbacks};
 
@@ -86,11 +89,10 @@ fn main() {
         ]);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &RefreshProjects, cx| refresh_projects(cx));
-        cx.set_menus([Menu::new(APP_NAME).items([
-            MenuItem::action("重新扫描项目", RefreshProjects),
-            MenuItem::separator(),
-            MenuItem::action(format!("退出 {APP_NAME}"), Quit),
-        ])]);
+        let app_config = config::AppConfig::load();
+        i18n::set_current(app_config.language);
+        apply_ui_typography(&app_config, cx);
+        apply_app_menus(cx);
 
         cx.set_global(AppState {
             main_window: None,
@@ -167,6 +169,23 @@ fn main() {
             }
         }
     });
+}
+
+/// Installs the application menu using the current interface language.
+fn apply_app_menus(cx: &mut App) {
+    cx.set_menus([Menu::new(APP_NAME).items([
+        MenuItem::action(tr!("重新扫描项目", "Rescan projects"), RefreshProjects),
+        MenuItem::separator(),
+        MenuItem::action(tr_fmt!("退出 {APP_NAME}", "Quit {APP_NAME}"), Quit),
+    ])]);
+}
+
+/// Refreshes shell-level UI (application menu and tray menu) after a language change.
+fn apply_language_to_shell(cx: &mut App) {
+    apply_app_menus(cx);
+    if let Some(tray) = cx.try_global::<TrayGlobal>() {
+        tray._handle.apply_language();
+    }
 }
 
 fn handle_tray_command(cmd: TrayCommand, cx: &mut App) {
@@ -516,6 +535,7 @@ fn open_or_focus_main_window(cx: &mut App) -> Option<(AnyWindowHandle, Entity<Pr
     let bounds = Bounds::centered(None, window_size, cx);
 
     let callbacks = ProjectWindowCallbacks {
+        on_language_changed: Some(Arc::new(|cx| apply_language_to_shell(cx))),
         on_state_changed: Some(Arc::new(|report, launchers, loading, cx| {
             if cx.has_global::<AppState>() {
                 {

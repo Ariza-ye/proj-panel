@@ -5,11 +5,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::Language;
 use crate::model::AgentKind;
 use crate::scanner::paths::{app_config_dir, dedup_key, normalize_path};
 
 const APP_CONFIG_DIR_NAME: &str = "ProjPanel";
 const CONFIG_FILE_NAME: &str = "config.json";
+
+pub const MIN_UI_FONT_SIZE: u8 = 14;
+pub const DEFAULT_UI_FONT_SIZE: u8 = 16;
+pub const MAX_UI_FONT_SIZE: u8 = 20;
 
 /// Persistent user configuration for ProjPanel.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -23,9 +28,25 @@ pub struct AppConfig {
     /// Hidden projects: normalized deduplication key mapped to the original path text.
     #[serde(default)]
     pub hidden_projects: HashMap<String, String>,
+    /// Interface language.
+    #[serde(default)]
+    pub language: Language,
+    /// 界面基准字号，未设置时使用默认字号。
+    #[serde(default)]
+    pub ui_font_size: Option<u8>,
+    /// 界面字体族名称，未设置时跟随系统。
+    #[serde(default)]
+    pub ui_font_family: Option<String>,
 }
 
 impl AppConfig {
+    /// 读取界面基准字号，并限制在支持的范围内。
+    pub fn effective_ui_font_size(&self) -> u8 {
+        self.ui_font_size
+            .unwrap_or(DEFAULT_UI_FONT_SIZE)
+            .clamp(MIN_UI_FONT_SIZE, MAX_UI_FONT_SIZE)
+    }
+
     /// Returns the default configuration file path for the current platform.
     pub fn default_path() -> Option<PathBuf> {
         app_config_dir(APP_CONFIG_DIR_NAME).map(|dir| dir.join(CONFIG_FILE_NAME))
