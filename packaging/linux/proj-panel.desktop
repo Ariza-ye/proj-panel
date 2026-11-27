@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=ProjPanel
+Comment=Cross-platform desktop workbench aggregating projects across AI agents
+Comment[zh_CN]=跨平台 AI Agent 项目汇总工作台与系统托盘工具
+Exec=/usr/bin/ProjPanel
+Icon=proj-panel
+Terminal=false
+Type=Application
+Categories=Development;Utility;
+StartupNotify=true
+StartupWMClass=com.projpanel.app

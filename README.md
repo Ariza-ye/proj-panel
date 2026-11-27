@@ -1,3 +1,5 @@
+<img src="assets/icons/app/app-icon-light.png" alt="ProjPanel 软件图标" width="96">
+
 # ProjPanel
 
 基于 Rust + [GPUI Kit](https://gpui-kit.com) 构建的跨平台桌面工作台与系统托盘工具，用于自动读取并汇总本机各类 AI Agent / AI IDE 加载过的项目列表。

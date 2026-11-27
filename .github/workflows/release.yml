@@ -1,0 +1,442 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要编译发布的 Git Tag（例如 v0.1.0）；若已在上方 'Use workflow from' 直接选择 Tag 则可留空"
+        required: false
+        type: string
+      prerelease:
+        description: "标记为 Pre-release（未勾选时，含 '-' 的 tag 如 v0.1.0-beta.1 会自动视为 Pre-release）"
+        required: false
+        default: false
+        type: boolean
+      draft:
+        description: "发布为草稿 Release（Draft）"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-tag:
+    name: Resolve & Validate Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      deb_version: ${{ steps.resolve.outputs.deb_version }}
+      arch_pkgver: ${{ steps.resolve.outputs.arch_pkgver }}
+      win_version: ${{ steps.resolve.outputs.win_version }}
+      is_prerelease: ${{ steps.resolve.outputs.is_prerelease }}
+    steps:
+      - name: Checkout repository metadata
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate and resolve target tag
+        id: resolve
+        shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          TAG="$(printf '%s' "$INPUT_TAG" | xargs)"
+          if [[ -z "$TAG" ]]; then
+            if [[ "$REF_TYPE" == "tag" ]]; then
+              TAG="$REF_NAME"
+            else
+              echo "::error::未指定发布 Tag。请在 'Use workflow from' 下拉框选择 Tag，或在 'tag' 输入框填写已存在的 Git Tag（例如 v0.1.0）。"
+              exit 1
+            fi
+          fi
+
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::远程仓库中不存在 Tag '${TAG}'，请先创建并推送该 Tag。"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '${TAG}' 对应的版本号 '${VERSION}' 格式不合法（应类似 v0.1.0 或 v0.1.0-rc.1）。"
+            exit 1
+          fi
+
+          # Debian uses '~' so prerelease sorts earlier than final release (e.g. 0.1.0~beta.1 < 0.1.0).
+          DEB_VERSION="${VERSION//-/\~}"
+          # Arch Linux pkgver forbids '-' characters.
+          ARCH_PKGVER="${VERSION//-/_}"
+          # Inno Setup VersionInfoVersion requires numeric A.B.C.D format.
+          CORE_VER="${VERSION%%[-+]*}"
+          IFS='.' read -r V_MAJ V_MIN V_PAT V_BLD <<< "$CORE_VER"
+          WIN_VERSION="${V_MAJ:-0}.${V_MIN:-0}.${V_PAT:-0}.${V_BLD:-0}"
+
+          IS_PRERELEASE="false"
+          if [[ "$INPUT_PRERELEASE" == "true" || "$TAG" == *-* ]]; then
+            IS_PRERELEASE="true"
+          fi
+
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+            echo "deb_version=${DEB_VERSION}"
+            echo "arch_pkgver=${ARCH_PKGVER}"
+            echo "win_version=${WIN_VERSION}"
+            echo "is_prerelease=${IS_PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved release tag=${TAG}, version=${VERSION}, deb=${DEB_VERSION}, arch=${ARCH_PKGVER}, win=${WIN_VERSION}, prerelease=${IS_PRERELEASE}"
+
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    needs: resolve-tag
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+            expected_arch: arm64
+          - arch: x86_64
+            target: x86_64-apple-darwin
+            expected_arch: x86_64
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: macos-${{ matrix.arch }}
+
+      - name: Build release binary
+        env:
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }}
+          ACTUAL_ARCH="$(lipo -archs "target/${{ matrix.target }}/release/ProjPanel")"
+          echo "Built binary architecture: ${ACTUAL_ARCH}"
+          if [[ "${ACTUAL_ARCH}" != "${{ matrix.expected_arch }}" ]]; then
+            echo "::error::Expected architecture ${{ matrix.expected_arch }}, got ${ACTUAL_ARCH}"
+            exit 1
+          fi
+
+      - name: Package .app and .dmg
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+          APP_VERSION: ${{ needs.resolve-tag.outputs.version }}
+          SKIP_BUILD: "1"
+          CREATE_DMG: "1"
+          DMG_OUTPUT: dist/ProjPanel-${{ needs.resolve-tag.outputs.version }}-macos-${{ matrix.arch }}.dmg
+        run: |
+          chmod +x scripts/bundle_macos.sh
+          ./scripts/bundle_macos.sh
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/ProjPanel-${{ needs.resolve-tag.outputs.version }}-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (x86_64)
+    needs: resolve-tag
+    runs-on: windows-latest
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-x86_64
+
+      - name: Build release binary
+        shell: pwsh
+        run: |
+          cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Package portable ZIP and Inno Setup installer
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ needs.resolve-tag.outputs.version }}
+          WIN_VERSION: ${{ needs.resolve-tag.outputs.win_version }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Path "dist" -Force | Out-Null
+
+          $binPath = "target\x86_64-pc-windows-msvc\release\ProjPanel.exe"
+          $zipStage = "target\packaging\zip-stage"
+          if (Test-Path $zipStage) { Remove-Item -Recurse -Force $zipStage }
+          New-Item -ItemType Directory -Path $zipStage -Force | Out-Null
+          Copy-Item $binPath -Destination "$zipStage\ProjPanel.exe"
+          Copy-Item "README.md" -Destination "$zipStage\README.md"
+
+          $zipPath = "dist\ProjPanel-$env:APP_VERSION-windows-x86_64.zip"
+          Compress-Archive -Path "$zipStage\*" -DestinationPath $zipPath -Force
+
+          $icoPath = "target\packaging\app-icon.ico"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File "packaging\windows\make_ico.ps1" `
+            -InputPng "assets\icons\app\app-icon-light.png" `
+            -OutputIco $icoPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "make_ico.ps1 failed with exit code $LASTEXITCODE"
+          }
+
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
+          if (-not $iscc) {
+            $defaultIscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+            if (Test-Path $defaultIscc) {
+              $iscc = $defaultIscc
+            } else {
+              throw "Inno Setup compiler (ISCC.exe) not found on runner."
+            }
+          }
+
+          & $iscc `
+            "/DAppVersion=$env:APP_VERSION" `
+            "/DWinVersion=$env:WIN_VERSION" `
+            "/DBinaryPath=$((Resolve-Path $binPath).Path)" `
+            "/DReadmePath=$((Resolve-Path 'README.md').Path)" `
+            "/DIconPath=$((Resolve-Path $icoPath).Path)" `
+            "/DOutputDir=$((Resolve-Path 'dist').Path)" `
+            "/DOutputBaseFilename=ProjPanel-$env:APP_VERSION-windows-x86_64-setup" `
+            "packaging\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "ISCC failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: |
+            dist/ProjPanel-${{ needs.resolve-tag.outputs.version }}-windows-x86_64.zip
+            dist/ProjPanel-${{ needs.resolve-tag.outputs.version }}-windows-x86_64-setup.exe
+          if-no-files-found: error
+
+  build-debian:
+    name: Build Debian (amd64 .deb)
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Install Debian build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            curl \
+            git \
+            build-essential \
+            pkg-config \
+            cmake \
+            clang \
+            dpkg-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libx11-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libfontconfig1-dev \
+            libfreetype-dev
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: debian-bookworm-amd64
+
+      - name: Build release binary
+        run: |
+          cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Package .deb
+        env:
+          DEB_VERSION: ${{ needs.resolve-tag.outputs.deb_version }}
+          ARCH: amd64
+          BINARY_PATH: target/x86_64-unknown-linux-gnu/release/ProjPanel
+          OUTPUT_DIR: dist
+        run: |
+          chmod +x packaging/debian/build_deb.sh
+          ./packaging/debian/build_deb.sh
+
+      - name: Upload Debian artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-amd64
+          path: dist/proj-panel_${{ needs.resolve-tag.outputs.deb_version }}_amd64.deb
+          if-no-files-found: error
+
+  build-arch:
+    name: Build Arch Linux (x86_64 .pkg.tar.zst)
+    needs: resolve-tag
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install Arch Linux build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            ca-certificates \
+            curl \
+            git \
+            rustup \
+            pkgconf \
+            cmake \
+            clang \
+            libxkbcommon \
+            libxkbcommon-x11 \
+            libxcb \
+            libx11 \
+            wayland \
+            vulkan-headers \
+            vulkan-icd-loader \
+            fontconfig \
+            freetype2
+
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ needs.resolve-tag.outputs.tag }}
+
+      - name: Configure Rust toolchain
+        run: |
+          rustup default stable
+          rustup target add x86_64-unknown-linux-gnu
+          rustc --version
+          cargo --version
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: archlinux-x86_64
+
+      - name: Build release binary
+        run: |
+          cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Package Arch .pkg.tar.zst
+        env:
+          ARCH_PKGVER: ${{ needs.resolve-tag.outputs.arch_pkgver }}
+          BINARY_PATH: target/x86_64-unknown-linux-gnu/release/ProjPanel
+          OUTPUT_DIR: dist
+        run: |
+          chmod +x packaging/arch/build_arch.sh
+          ./packaging/arch/build_arch.sh
+
+      - name: Upload Arch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-x86_64
+          path: dist/proj-panel-${{ needs.resolve-tag.outputs.arch_pkgver }}-1-x86_64.pkg.tar.*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - resolve-tag
+      - build-macos
+      - build-windows
+      - build-debian
+      - build-arch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate SHA256 checksums
+        working-directory: release-assets
+        run: |
+          set -euo pipefail
+          ls -lh
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+          IS_PRERELEASE: ${{ needs.resolve-tag.outputs.is_prerelease }}
+          IS_DRAFT: ${{ inputs.draft }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; uploading updated assets..."
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            CREATE_ARGS=(
+              "$TAG"
+              release-assets/*
+              --title "ProjPanel ${TAG}"
+              --generate-notes
+            )
+            if [[ "$IS_PRERELEASE" == "true" ]]; then
+              CREATE_ARGS+=(--prerelease)
+            fi
+            if [[ "$IS_DRAFT" == "true" ]]; then
+              CREATE_ARGS+=(--draft)
+            fi
+            gh release create "${CREATE_ARGS[@]}"
+          fi
+
+          RELEASE_URL="$(gh release view "$TAG" --json url --jq '.url')"
+          {
+            echo "## Release ${TAG} Published"
+            echo ""
+            echo "URL: ${RELEASE_URL}"
+            echo ""
+            echo "### Checksums"
+            echo '```text'
+            cat release-assets/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
